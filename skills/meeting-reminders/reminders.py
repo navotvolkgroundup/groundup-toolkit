@@ -575,6 +575,12 @@ def _do_process_meeting_reminders():
                 print(f"    ⚠  Could not parse time for {summary}: {e}")
                 pass
 
+            # Skip solo meetings (blocked time / focus time)
+            other_attendees = [a for a in attendees if a.get('email', '') != email]
+            if not other_attendees:
+                print(f"    ⏭  Solo meeting (blocked time): {summary}")
+                continue
+
             # Check if already notified
             if db.is_notified(event_id, email):
                 print(f"    ⏭  Already notified: {summary}")
