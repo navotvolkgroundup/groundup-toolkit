@@ -217,6 +217,9 @@ Transcript:
 
 def send_meeting_summary_email(notes, meeting_name, meeting_date):
     """Email meeting summary to the alert/admin email"""
+    import shlex
+    import tempfile
+
     admin_email = config.alert_email
     admin_name = config.get_member_by_email(admin_email)
     admin_name = admin_name['name'].split()[0] if admin_name else 'Team'
@@ -233,11 +236,18 @@ Here's the summary from {meeting_name} recorded on {meeting_date}:
 Processed by {config.assistant_name}'s Meeting Bot
 """
 
+    body_fd, body_path = tempfile.mkstemp(suffix='.txt', prefix='meeting-summary-')
     try:
-        subject_escaped = subject.replace("'", "'\\''").replace('"', '\\"')
-        body_escaped = body.replace("'", "'\\''").replace('"', '\\"')
+        with os.fdopen(body_fd, 'w') as f:
+            f.write(body)
 
-        cmd = f"gog gmail send --to '{admin_email}' --subject '{subject_escaped}' --body '{body_escaped}' --account {GOG_ACCOUNT}"
+        cmd = (
+            f'gog gmail send'
+            f' --to {shlex.quote(admin_email)}'
+            f' --subject {shlex.quote(subject)}'
+            f' --body-file {shlex.quote(body_path)}'
+            f' --account {shlex.quote(GOG_ACCOUNT)}'
+        )
 
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, executable='/bin/bash', timeout=30)
 
@@ -251,6 +261,11 @@ Processed by {config.assistant_name}'s Meeting Bot
     except Exception as e:
         print(f'  ❌ Error sending email: {e}')
         return False
+    finally:
+        try:
+            os.unlink(body_path)
+        except OSError:
+            pass
 
 def main():
     """Main entry point"""
