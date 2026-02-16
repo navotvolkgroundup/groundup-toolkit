@@ -159,13 +159,15 @@ def send_email(to_email, subject, body):
 # --- State Management ---
 
 
-def save_state(deck_data, section_results=None, tldr=None):
+def save_state(deck_data, section_results=None, tldr=None, deck_url=None):
     """Save analysis state so the log action can read it later."""
     state = {
         'deck_data': deck_data,
         'tldr': tldr,
         'timestamp': datetime.now().isoformat(),
     }
+    if deck_url:
+        state['deck_url'] = deck_url
     if section_results:
         state['hubspot_note'] = format_hubspot_note(deck_data, section_results, tldr)
     with open(STATE_FILE, 'w') as f:
@@ -1100,6 +1102,45 @@ def log_to_hubspot(phone):
         print(f"  Failed to log to HubSpot", file=sys.stderr)
 
 
+def full_report(phone, email=None):
+    """Run full 12-section evaluation from saved state (no URL needed)."""
+    state = load_state()
+    if not state or not state.get('deck_data', {}).get('company_name'):
+        send_whatsapp(phone, "No recent deck analysis found. Send a deck link first.")
+        return
+
+    # Check state is recent (within 2 hours)
+    state_time = datetime.fromisoformat(state['timestamp'])
+    if (datetime.now() - state_time).total_seconds() > 7200:
+        send_whatsapp(phone, "Last analysis is too old. Send a new deck link to start fresh.")
+        return
+
+    deck_data = state['deck_data']
+    deck_url = state.get('deck_url')
+    company = deck_data['company_name']
+
+    start_time = time.time()
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] Full report from state: {company}")
+
+    send_whatsapp(phone, f"Evaluating *{company}*. Running 12-section deep analysis — results in 3-5 minutes.")
+
+    # Phase 2: Research
+    print("  Phase 2: Researching...")
+    queries = build_research_queries(deck_data)
+    research_results = run_research(queries)
+
+    # Phase 3: Analyze
+    print("  Phase 3: Running 12 analysis sections...")
+    section_results = run_analysis(deck_data, research_results, progress_phone=phone)
+
+    # Phase 4: Deliver
+    print("  Phase 4: Delivering results...")
+    deliver_results(deck_data, section_results, phone, email)
+
+    elapsed = time.time() - start_time
+    print(f"  Done in {elapsed:.0f}s — {company} full report complete")
+
+
 def test():
     """Test with hardcoded sample deck content."""
     phone = config.alert_phone
@@ -1215,6 +1256,11 @@ def main():
         phone = sys.argv[3]
         email = sys.argv[4] if len(sys.argv) > 4 else None
         deep_evaluate(deck_url, phone, email)
+
+    elif action == 'full-report':
+        phone = sys.argv[2] if len(sys.argv) > 2 else config.alert_phone
+        email = sys.argv[3] if len(sys.argv) > 3 else None
+        full_report(phone, email)
 
     elif action == 'log':
         phone = sys.argv[2] if len(sys.argv) > 2 else config.alert_phone

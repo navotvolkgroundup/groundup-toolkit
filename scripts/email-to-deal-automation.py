@@ -8,7 +8,9 @@ import glob
 from datetime import datetime, timedelta
 import re
 
+# Support both local (scripts/../lib/) and server (~/.openclaw/lib/) layouts
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.expanduser('~/.openclaw'))
 from lib.config import config
 
 ANTHROPIC_API_KEY = config.anthropic_api_key
@@ -40,6 +42,10 @@ PROCESSED_LABEL = 'HubSpot-Processed'
 WHATSAPP_ACCOUNT = config.whatsapp_account
 
 TEAM_PHONES = config.team_phones
+EMAIL_TO_PHONE = {email: phone for phone, email in TEAM_PHONES.items()}
+
+# Deal analyzer state file (shared with skills/deal-analyzer)
+DEAL_ANALYZER_STATE = '/tmp/deal-analyzer-state.json'
 
 def run_gog_command(cmd):
     full_cmd = f'source ~/.profile && export GOG_KEYRING_PASSWORD="{config.gog_keyring_password}" && gog {cmd} --account {GOG_ACCOUNT} --json'
@@ -971,6 +977,55 @@ def extract_pdf_text(pdf_path):
         print(f'  Error extracting PDF text: {e}')
         return None
 
+def parse_analysis_to_deck_data(analysis_text):
+    """Convert email pipeline's analysis text to deal-analyzer deck_data format."""
+    field_map = {
+        'company name': 'company_name',
+        'product overview': 'product_overview',
+        'problem/solution': 'problem_solution',
+        'key capabilities': 'key_capabilities',
+        'team background': 'team_background',
+        'gtm strategy': 'gtm_strategy',
+        'traction': 'traction',
+        'fundraising': 'fundraising',
+        'competition': 'competitors_mentioned_text',
+    }
+
+    deck_data = {}
+    for line in analysis_text.split('\n'):
+        line = line.strip()
+        if ':' not in line:
+            continue
+        key, _, value = line.partition(':')
+        key_lower = key.strip().lower().replace('**', '')
+        value = value.strip().strip('*')
+
+        for label, field in field_map.items():
+            if label in key_lower:
+                if 'not mentioned' not in value.lower() and value:
+                    deck_data[field] = value
+                break
+
+    # Move competition text into the right fields
+    comp_text = deck_data.pop('competitors_mentioned_text', None)
+    if comp_text:
+        deck_data['competitors_mentioned'] = [c.strip() for c in comp_text.split(',') if c.strip()]
+
+    return deck_data
+
+
+def save_deal_analyzer_state(deck_data, deck_url=None):
+    """Save state so deal-analyzer full-report can pick it up."""
+    state = {
+        'deck_data': deck_data,
+        'timestamp': datetime.now().isoformat(),
+    }
+    if deck_url:
+        state['deck_url'] = deck_url
+    with open(DEAL_ANALYZER_STATE, 'w') as f:
+        json.dump(state, f, indent=2)
+
+
 def process_email(thread):
     from_email = thread.get('from', '')
     subject = thread.get('subject', 'No Subject')
@@ -1011,13 +1066,13 @@ def process_email(thread):
     # Check for deck links and analyze if found
     deck_links = extract_deck_links(f'{subject} {body}')
     deck_description = None
+    analysis = None
 
     if deck_links and ANTHROPIC_API_KEY:
         link = deck_links[0]
         print(f'  Found deck link: {link[:50]}...')
         print(f'  Analyzing deck with Claude...')
 
-        analysis = None
         if is_papermark_link(link):
             print(f'  Papermark link detected — using Camofox browser')
             images = fetch_papermark_with_camofox(link)
@@ -1123,6 +1178,19 @@ def process_email(thread):
         pipeline_name = PIPELINE_NAMES.get(pipeline_id, pipeline_id)
         stage_name = STAGE_NAMES.get(stage_id, stage_id)
         send_confirmation_email(sender_email, company_data['name'], pipeline_name, stage_name, deal_url)
+
+        # Offer full report via WhatsApp if we had a deck analysis
+        if analysis:
+            sender_phone = EMAIL_TO_PHONE.get(sender_email)
+            if sender_phone:
+                deck_data = parse_analysis_to_deck_data(analysis)
+                deck_url_for_state = deck_links[0] if deck_links else None
+                save_deal_analyzer_state(deck_data, deck_url_for_state)
+
+                summary = format_deck_description(analysis) or analysis[:1500]
+                msg = f"*New deal: {company_data['name']}*\n\n{summary}\n\n---\nWant the full 12-section investment report? Just reply 'full report'."
+                send_whatsapp(sender_phone, msg)
+                print(f'  Sent WhatsApp summary + full report offer to {sender_phone}')
 
         mark_email_processed(thread_id)
         return True

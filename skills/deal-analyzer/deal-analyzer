@@ -34,6 +34,12 @@ case "$ACTION" in
         /usr/bin/python3 "$SCRIPT" evaluate "$DECK_URL" "$NOTIFY_PHONE" "$NOTIFY_EMAIL"
         ;;
 
+    full-report)
+        PHONE="${1:-}"
+        EMAIL="${2:-}"
+        /usr/bin/python3 "$SCRIPT" full-report "$PHONE" "$EMAIL"
+        ;;
+
     log)
         PHONE="${1:-}"
         /usr/bin/python3 "$SCRIPT" log "$PHONE"
@@ -51,6 +57,7 @@ case "$ACTION" in
         echo "Actions:"
         echo "  analyze <URL> [PHONE] [EMAIL]    Quick deck extraction (10s)"
         echo "  evaluate <URL> <PHONE> [EMAIL]   Full 12-section analysis (3-5 min)"
+        echo "  full-report [PHONE] [EMAIL]      Full report from last analysis state"
         echo "  log [PHONE]                      Log last analysis to HubSpot"
         echo "  test                             Run test with sample data"
         exit 0

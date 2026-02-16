@@ -16,9 +16,15 @@ AI-powered investment evaluation that transforms a pitch deck into a comprehensi
 
 ## Conversational Flow
 
-1. User sends a deck URL → `analyze` runs quick extraction, sends summary via WhatsApp, asks "Want the full 12-section investment report?"
-2. User replies "full report" → `evaluate` runs deep analysis (reuses extraction), sends TL;DR + full memo via WhatsApp + email, asks "Want me to log this to HubSpot?"
+**Via WhatsApp:**
+1. User sends a deck URL → `analyze` runs quick extraction, sends summary, asks "Want the full 12-section investment report?"
+2. User replies "full report" → `full-report` runs deep analysis from saved state, sends TL;DR + memo via WhatsApp + email, asks "Want me to log this to HubSpot?"
 3. User replies "log to hubspot" → `log` searches HubSpot for the company and adds the analysis as a note
+
+**Via Email (automatic):**
+1. Team member emails a deck to christina@groundup.vc → email pipeline extracts deck, creates company + deal in HubSpot
+2. Sender receives WhatsApp with quick analysis + "Want the full 12-section investment report?"
+3. Sender replies "full report" → same deep analysis flow as above
 
 ## When to Use This Skill
 
@@ -27,7 +33,7 @@ AI-powered investment evaluation that transforms a pitch deck into a comprehensi
 - "evaluate this deal: [URL]" → full 12-section analysis
 - "review this pitch deck: [URL]"
 - "run due diligence on [URL]"
-- "full report" → runs evaluate on last analyzed deck
+- "full report" → runs full 12-section analysis from last extraction
 - "log to hubspot" → logs last evaluation to HubSpot
 
 ## Actions
@@ -44,6 +50,13 @@ Full 12-section investment analysis with web research. Delivers TL;DR + WhatsApp
 
 ```bash
 deal-analyzer evaluate <deck-url> <phone> [email]
+```
+
+### full-report (deep — 3-5 minutes)
+Run full evaluation using saved state from a prior analyze or email extraction. No URL needed.
+
+```bash
+deal-analyzer full-report [phone] [email]
 ```
 
 ### log
