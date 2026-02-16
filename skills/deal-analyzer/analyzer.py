@@ -255,7 +255,9 @@ DOCSEND_PATTERN = re.compile(r'https://docsend\.com/view/[a-zA-Z0-9]+')
 GDOCS_PATTERN = re.compile(r'https://docs\.google\.com/[^\s<>"]+')
 GDRIVE_PATTERN = re.compile(r'https://drive\.google\.com/[^\s<>"]+')
 DROPBOX_PATTERN = re.compile(r'https://www\.dropbox\.com/[^\s<>"]+')
-PDF_PATTERN = re.compile(r'https://[^\s<>"]*\.pdf')
+# Only match PDF links on known allowed domains (not arbitrary domains)
+PAPERMARK_PATTERN = re.compile(r'https://(?:www\.)?papermark\.com/view/[^\s<>"]+')
+PITCH_PATTERN = re.compile(r'https://(?:www\.)?pitch\.com/[^\s<>"]+')
 
 # Allowed URL domains for deck fetching (SSRF protection)
 ALLOWED_DECK_DOMAINS = {
@@ -296,7 +298,7 @@ def is_safe_url(url):
 
 def extract_deck_links(text):
     links = []
-    for pattern in [DOCSEND_PATTERN, GDOCS_PATTERN, GDRIVE_PATTERN, DROPBOX_PATTERN, PDF_PATTERN]:
+    for pattern in [DOCSEND_PATTERN, GDOCS_PATTERN, GDRIVE_PATTERN, DROPBOX_PATTERN, PAPERMARK_PATTERN, PITCH_PATTERN]:
         links.extend(pattern.findall(text))
     return list(dict.fromkeys(links))
 
