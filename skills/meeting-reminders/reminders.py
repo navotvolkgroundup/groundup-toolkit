@@ -302,6 +302,11 @@ def get_external_attendees(attendees, owner_email):
     return external
 
 
+def is_internal_meeting(attendees, owner_email):
+    """Check if all attendees are internal (team domain) — no external guests"""
+    return len(get_external_attendees(attendees, owner_email)) == 0
+
+
 def search_hubspot_company(email_domain):
     """Search HubSpot for company by domain"""
     if not MATON_API_KEY:
@@ -605,7 +610,7 @@ def _do_process_meeting_reminders():
 
             # Format meeting details
             meeting_time = format_meeting_time(start_time, member['timezone'])
-            attendee_list = format_attendees([a.get('email') for a in attendees], email)
+            internal = is_internal_meeting(attendees, email)
 
             # Build basic message with actual minutes remaining
             mins_away = int(round(minutes_away))
@@ -614,8 +619,12 @@ def _do_process_meeting_reminders():
                 f"",
                 f"📅 {summary}",
                 f"⏰ {meeting_time}",
-                f"👥 {attendee_list}"
             ]
+
+            # Only show attendee list for external meetings
+            if not internal:
+                attendee_list = format_attendees([a.get('email') for a in attendees], email)
+                message_lines.append(f"👥 {attendee_list}")
 
             # Add location/link
             meet_link = None
@@ -630,20 +639,22 @@ def _do_process_meeting_reminders():
             elif location:
                 message_lines.append(f"📍 {location}")
 
-            # Get HubSpot context
-            hubspot_context = get_hubspot_context(attendees, email)
-            if hubspot_context:
-                context_lines = format_hubspot_context(hubspot_context)
-                message_lines.extend(context_lines)
+            # Only fetch participant context for external meetings
+            if not internal:
+                # Get HubSpot context
+                hubspot_context = get_hubspot_context(attendees, email)
+                if hubspot_context:
+                    context_lines = format_hubspot_context(hubspot_context)
+                    message_lines.extend(context_lines)
 
-            # Enrich external attendees with LinkedIn, Crunchbase, GitHub, News
-            if ENRICHMENT_AVAILABLE and attendees:
-                enriched_attendees = enrich_external_attendees(attendees, email)
-                if enriched_attendees:
-                    message_lines.append("")
-                    message_lines.append("👥 ATTENDEE CONTEXT:")
-                    for enriched in enriched_attendees:
-                        message_lines.append(enriched)
+                # Enrich external attendees with LinkedIn, Crunchbase, GitHub, News
+                if ENRICHMENT_AVAILABLE and attendees:
+                    enriched_attendees = enrich_external_attendees(attendees, email)
+                    if enriched_attendees:
+                        message_lines.append("")
+                        message_lines.append("👥 ATTENDEE CONTEXT:")
+                        for enriched in enriched_attendees:
+                            message_lines.append(enriched)
 
             message = '\n'.join(message_lines)
 
@@ -778,7 +789,7 @@ def format_next_meeting_message(event, member_info):
 
     # Format meeting time
     meeting_time = format_meeting_time(start_time, member_info['timezone'])
-    attendee_list = format_attendees([a.get('email') for a in attendees], member_info.get('email', ''))
+    internal = is_internal_meeting(attendees, member_info.get('email', ''))
 
     # Build message
     message_lines = [
@@ -786,8 +797,12 @@ def format_next_meeting_message(event, member_info):
         f"",
         f"📝 {summary}",
         f"⏰ {meeting_time}",
-        f"👥 {attendee_list}"
     ]
+
+    # Only show attendee list for external meetings
+    if not internal:
+        attendee_list = format_attendees([a.get('email') for a in attendees], member_info.get('email', ''))
+        message_lines.append(f"👥 {attendee_list}")
 
     # Add location/link
     meet_link = None
@@ -802,20 +817,22 @@ def format_next_meeting_message(event, member_info):
     elif location:
         message_lines.append(f"📍 {location}")
 
-    # Enrich external attendees with LinkedIn, Crunchbase, GitHub, News
-    if ENRICHMENT_AVAILABLE and attendees:
-        enriched_attendees = enrich_external_attendees(attendees, member_info.get('email', ''))
-        if enriched_attendees:
-            message_lines.append("")
-            message_lines.append("👥 ATTENDEE CONTEXT:")
-            for enriched in enriched_attendees:
-                message_lines.append(enriched)
+    # Only fetch participant context for external meetings
+    if not internal:
+        # Enrich external attendees with LinkedIn, Crunchbase, GitHub, News
+        if ENRICHMENT_AVAILABLE and attendees:
+            enriched_attendees = enrich_external_attendees(attendees, member_info.get('email', ''))
+            if enriched_attendees:
+                message_lines.append("")
+                message_lines.append("👥 ATTENDEE CONTEXT:")
+                for enriched in enriched_attendees:
+                    message_lines.append(enriched)
 
-    # Get HubSpot context
-    hubspot_context = get_hubspot_context(attendees, member_info.get('email', ''))
-    if hubspot_context:
-        context_lines = format_hubspot_context(hubspot_context)
-        message_lines.extend(context_lines)
+        # Get HubSpot context
+        hubspot_context = get_hubspot_context(attendees, member_info.get('email', ''))
+        if hubspot_context:
+            context_lines = format_hubspot_context(hubspot_context)
+            message_lines.extend(context_lines)
 
     return '\n'.join(message_lines)
 
