@@ -86,13 +86,36 @@ def is_lp_email(subject, body):
     text_to_check = f'{subject} {body}'
     return bool(re.search(lp_pattern, text_to_check, re.IGNORECASE))
 
+def _is_own_firm_name(name):
+    """Check if a name matches our own firm (should never be a deal)."""
+    normalized = re.sub(r'[\s\-_]+', '', name).lower()
+    domain_base = re.sub(r'[\s\-_\.]+', '', config.team_domain.split('.')[0]).lower()
+    # Match domain-based names: "groundup", "groundupventures", "groundupvc", etc.
+    return normalized.startswith(domain_base)
+
 def extract_company_info(thread):
     subject = thread.get('subject', '')
     subject_clean = re.sub(r'^(re:|fwd:)\s*', '', subject, flags=re.IGNORECASE).strip()
     # Remove LP mentions from company name
     subject_clean = re.sub(r'\bLP\b|\bL\.P\.\b|limited partner', '', subject_clean, flags=re.IGNORECASE).strip()
+
+    # Handle "Firm x Startup" or "Firm <> Startup" subject patterns
+    # Pick the side that isn't our own firm name
+    split_match = re.split(r'\s+(?:x|<>|<->|&|and|meets?|intro(?:ducing)?(?:\s*-)?)\s+', subject_clean, flags=re.IGNORECASE)
+    if len(split_match) == 2:
+        left, right = split_match[0].strip(), split_match[1].strip()
+        if _is_own_firm_name(left) and not _is_own_firm_name(right):
+            subject_clean = right
+        elif _is_own_firm_name(right) and not _is_own_firm_name(left):
+            subject_clean = left
+
     deck_match = re.search(r'(.+?)\s+(deck|pitch|presentation)', subject_clean, re.IGNORECASE)
     company_name = deck_match.group(1).strip() if deck_match else subject_clean or 'Company from Email'
+
+    # Final guard: never use our own firm name as a deal
+    if _is_own_firm_name(company_name):
+        company_name = 'Company from Email'
+
     return {'name': company_name, 'description': f'Created from email: {subject}'}
 
 def create_hubspot_company(company_data):
