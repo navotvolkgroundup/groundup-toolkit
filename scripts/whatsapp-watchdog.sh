@@ -72,15 +72,23 @@ send_alert() {
         log "Calling $ALERT_PHONE to alert about WhatsApp failure..."
         twiml='<Response><Say voice="alice">Hey, the assistant WhatsApp is down and could not auto-recover. Please SSH into the server and run: openclaw channels login, to scan the QR code.</Say><Pause length="2"/><Say voice="alice">Again, WhatsApp is down. SSH to the server and run openclaw channels login.</Say></Response>'
 
+        # Write Twilio credentials to a temp netrc file so they don't appear
+        # in shell command strings, ps output, or log files.
+        _twilio_netrc=$(mktemp /tmp/.twilio-netrc.XXXXXX)
+        chmod 600 "$_twilio_netrc"
+        printf 'machine api.twilio.com\n  login %s\n  password %s\n' \
+            "$TWILIO_API_KEY_SID" "$TWILIO_API_KEY_SECRET" > "$_twilio_netrc"
+
         curl -s -X POST "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json" \
-            -u "${TWILIO_API_KEY_SID}:${TWILIO_API_KEY_SECRET}" \
+            --netrc-file "$_twilio_netrc" \
             -d "To=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$ALERT_PHONE'))")" \
             -d "From=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$TWILIO_FROM_NUMBER'))")" \
             --data-urlencode "Twiml=$twiml" > /dev/null 2>&1
+
+        rm -f "$_twilio_netrc"
     fi
 
-    # Also send email alert
-    export GOG_KEYRING_PASSWORD="${GOG_KEYRING_PASSWORD}"
+    # Also send email alert (GOG_KEYRING_PASSWORD is already in env from .env source)
     gog gmail send --to "$ALERT_EMAIL" \
         --subject "Assistant WhatsApp is DOWN - QR scan needed" \
         --body "WhatsApp failed the send test and could not auto-recover after gateway restart. SSH to the server and run: openclaw channels login" \

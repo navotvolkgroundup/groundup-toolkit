@@ -110,15 +110,18 @@ class ReminderDatabase:
 
 
 def run_gog_command(cmd):
-    """Run gog command with keyring password"""
+    """Run gog command with keyring password.
+
+    Uses shell=False with argument list to prevent secrets from appearing
+    in shell command strings (which could leak into logs or ps output).
+    """
     env = os.environ.copy()
     env['GOG_KEYRING_PASSWORD'] = os.environ.get("GOG_KEYRING_PASSWORD", "")
-    full_cmd = f'gog {cmd} --account {shlex.quote(GOG_ACCOUNT)} --json'
+    cmd_args = ['gog'] + shlex.split(cmd) + ['--account', GOG_ACCOUNT, '--json']
 
     try:
         result = subprocess.run(
-            full_cmd,
-            shell=True,
+            cmd_args,
             capture_output=True,
             text=True,
             timeout=30,
