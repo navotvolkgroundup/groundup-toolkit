@@ -18,6 +18,26 @@ const { config, TOOLKIT_ROOT } = require("../../lib/config");
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Shell-escape a string using POSIX single-quote wrapping.
+ * This prevents shell injection when interpolating into shell commands.
+ */
+function shellEscape(s) {
+    return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
+
+/**
+ * Escape XML special characters to prevent XML injection in TwiML.
+ */
+function xmlEscape(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+}
+
 // .env loading is handled by the shared config loader (../../lib/config)
 
 const MEETING_URL = process.argv[2] || process.env.MEETING_URL;
@@ -191,13 +211,15 @@ function twilioCall(phone, personName, meetingTitle) {
             return false;
         }
 
-        const twiml = `<Response><Say voice="alice">Hey ${personName}, you are late to ${meetingTitle}. Everyone is waiting for you. Please join now.</Say><Pause length="2"/><Say voice="alice">Again, ${personName}, please join ${meetingTitle} right now.</Say></Response>`;
+        const safeName = xmlEscape(personName);
+        const safeTitle = xmlEscape(meetingTitle);
+        const twiml = `<Response><Say voice="alice">Hey ${safeName}, you are late to ${safeTitle}. Everyone is waiting for you. Please join now.</Say><Pause length="2"/><Say voice="alice">Again, ${safeName}, please join ${safeTitle} right now.</Say></Response>`;
 
-        const cmd = `curl -s -X POST "https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json" ` +
-            `-u "${apiKey}:${apiSecret}" ` +
+        const cmd = `curl -s -X POST "https://api.twilio.com/2010-04-01/Accounts/${shellEscape(accountSid)}/Calls.json" ` +
+            `-u ${shellEscape(apiKey + ":" + apiSecret)} ` +
             `-d "To=${encodeURIComponent(phone)}" ` +
             `-d "From=${encodeURIComponent(fromNumber)}" ` +
-            `--data-urlencode "Twiml=${twiml}"`;
+            `--data-urlencode "Twiml=${twiml.replace(/"/g, '\\"')}"`;
 
         console.log("Attendance: Calling " + personName + " at " + phone + " via Twilio");
         const result = execSync(cmd, { timeout: 30000, stdio: "pipe" }).toString();
@@ -226,10 +248,13 @@ function twilioCall(phone, personName, meetingTitle) {
  */
 function sendWhatsApp(phone, message) {
     try {
-        const cmd = `source "$HOME/.env" && openclaw message send --channel whatsapp --target "${phone}" --message "${message.replace(/"/g, '\\"')}"`;
+        const msgFile = "/tmp/wa-msg-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".txt";
+        fs.writeFileSync(msgFile, message, { mode: 0o600 });
+        const cmd = `source "$HOME/.env" && openclaw message send --channel whatsapp --target ${shellEscape(phone)} --message "$(cat ${shellEscape(msgFile)})"`;
         console.log("Attendance: Sending WhatsApp to " + phone);
         execSync(cmd, { shell: "/bin/bash", timeout: 30000, stdio: "pipe" });
         console.log("Attendance: WhatsApp sent to " + phone);
+        try { fs.unlinkSync(msgFile); } catch (_) {}
         return true;
     } catch (e) {
         console.log("Attendance: WhatsApp failed for " + phone + ": " + e.message);
@@ -362,8 +387,8 @@ async function processGeminiNotes(meetingTitle) {
     await sleep(120000);
 
     // Search for Gemini notes email
-    const GOG_ACCOUNT = `--account ${config.assistant.email}`;
-    const searchCmd = `source "$HOME/.env" && gog gmail messages search "from:gemini-notes@google.com subject:Notes newer_than:1h" ${GOG_ACCOUNT} --include-body --json --max 5 --no-input`;
+    const GOG_ACCOUNT = `--account ${shellEscape(config.assistant.email)}`;
+    const searchCmd = `source "$HOME/.env" && gog gmail messages search ${shellEscape("from:gemini-notes@google.com subject:Notes newer_than:1h")} ${GOG_ACCOUNT} --include-body --json --max 5 --no-input`;
 
     let notesEmail = null;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -470,7 +495,7 @@ async function processGeminiNotes(meetingTitle) {
             // Write body to temp file to avoid shell escaping issues
             const bodyFile = "/tmp/notes-email-body-" + name.toLowerCase() + ".txt";
             fs.writeFileSync(bodyFile, emailBody);
-            const sendCmd = `source "$HOME/.env" && gog gmail send --to "${email}" --subject "${subject.replace(/"/g, '\\"')}" --body-file "${bodyFile}" ${GOG_ACCOUNT} --force --no-input`;
+            const sendCmd = `source "$HOME/.env" && gog gmail send --to ${shellEscape(email)} --subject ${shellEscape(subject)} --body-file ${shellEscape(bodyFile)} ${GOG_ACCOUNT} --force --no-input`;
             execSync(sendCmd, { shell: "/bin/bash", timeout: 30000, stdio: "pipe" });
             console.log("Notes: Sent action items to " + name + " (" + email + ")");
             try { fs.unlinkSync(bodyFile); } catch (_) {}
@@ -489,8 +514,8 @@ async function processGeminiNotes(meetingTitle) {
  */
 function archiveNotesEmail(threadId) {
     try {
-        const GOG_ACCOUNT = `--account ${config.assistant.email}`;
-        const archiveCmd = `source "$HOME/.env" && gog gmail thread modify ${threadId} --remove INBOX,UNREAD --add ${config.assistant.name}-Processed ${GOG_ACCOUNT} --force --no-input`;
+        const GOG_ACCOUNT = `--account ${shellEscape(config.assistant.email)}`;
+        const archiveCmd = `source "$HOME/.env" && gog gmail thread modify ${shellEscape(threadId)} --remove INBOX,UNREAD --add ${shellEscape(config.assistant.name + "-Processed")} ${GOG_ACCOUNT} --force --no-input`;
         execSync(archiveCmd, { shell: "/bin/bash", timeout: 30000, stdio: "pipe" });
         console.log("Notes: Archived email (thread " + threadId + ")");
     } catch (e) {
