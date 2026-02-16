@@ -6,25 +6,29 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 TOOLKIT_DIR=/path/to/groundup-toolkit
 
+# Uses load-env.sh to export only the secrets each job needs,
+# instead of sourcing the entire .env into every process.
+# See scripts/load-env.sh for the per-job variable mappings.
+
 # Meeting reminders - every 5 minutes
 # Sends WhatsApp reminders 10-15 min before meetings
-*/5 * * * * source $TOOLKIT_DIR/.env && $TOOLKIT_DIR/skills/meeting-reminders/meeting-reminders reminders >> /var/log/meeting-reminders.log 2>&1
+*/5 * * * * $TOOLKIT_DIR/scripts/load-env.sh meeting-reminders -- $TOOLKIT_DIR/skills/meeting-reminders/meeting-reminders reminders >> /var/log/meeting-reminders.log 2>&1
 
 # Meeting bot - process recordings every 2 hours
-0 */2 * * * source $TOOLKIT_DIR/.env && $TOOLKIT_DIR/skills/meeting-bot/meeting-bot >> /var/log/meeting-bot.log 2>&1
+0 */2 * * * $TOOLKIT_DIR/scripts/load-env.sh meeting-bot -- $TOOLKIT_DIR/skills/meeting-bot/meeting-bot >> /var/log/meeting-bot.log 2>&1
 
 # Meeting auto-join - every 3 minutes
-*/3 * * * * source $TOOLKIT_DIR/.env && $TOOLKIT_DIR/skills/meeting-bot/meeting-auto-join >> /var/log/meeting-auto-join.log 2>&1
+*/3 * * * * $TOOLKIT_DIR/scripts/load-env.sh meeting-bot -- $TOOLKIT_DIR/skills/meeting-bot/meeting-auto-join >> /var/log/meeting-auto-join.log 2>&1
 
 # Email-to-deal automation - every 10 minutes
 # Scans inbox for pitch decks / deal emails and creates HubSpot deals
-*/10 * * * * source $TOOLKIT_DIR/.env && cd $TOOLKIT_DIR && $TOOLKIT_DIR/.venv/bin/python3 scripts/email-to-deal-automation.py >> /var/log/email-to-deal.log 2>&1
+*/10 * * * * $TOOLKIT_DIR/scripts/load-env.sh email-to-deal -- $TOOLKIT_DIR/.venv/bin/python3 $TOOLKIT_DIR/scripts/email-to-deal-automation.py >> /var/log/email-to-deal.log 2>&1
 
 # Health check - every 15 minutes
 */15 * * * * $TOOLKIT_DIR/scripts/health-check.sh >> /var/log/toolkit-health.log 2>&1
 
 # WhatsApp watchdog - every 5 minutes
-*/5 * * * * $TOOLKIT_DIR/scripts/whatsapp-watchdog.sh >> /var/log/whatsapp-watchdog.log 2>&1
+*/5 * * * * $TOOLKIT_DIR/scripts/load-env.sh watchdog -- $TOOLKIT_DIR/scripts/whatsapp-watchdog.sh >> /var/log/whatsapp-watchdog.log 2>&1
 
 # Scheduled tasks (Shabbat-aware) - every 2 hours
 0 */2 * * * $TOOLKIT_DIR/scripts/run-scheduled.sh >> /var/log/scheduled.log 2>&1
