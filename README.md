@@ -26,18 +26,13 @@ Plus operational scripts:
 
 ## Architecture
 
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  WhatsApp    │◄───►│   OpenClaw    │◄───►│  Skills &   │
-│  (Team Chat) │     │   Gateway     │     │  Scripts    │
-└─────────────┘     └──────────────┘     └──────┬──────┘
-                                                 │
-                    ┌────────────────────────────┤
-                    │            │               │
-              ┌─────▼─────┐ ┌───▼───┐ ┌────────▼────────┐
-              │  Google    │ │HubSpot│ │  Claude AI       │
-              │  Workspace │ │  CRM  │ │  (Analysis)      │
-              └───────────┘ └───────┘ └─────────────────┘
+```mermaid
+graph TD
+    A[WhatsApp<br/>Team Chat] <--> B[OpenClaw<br/>Gateway]
+    B <--> C[Skills &<br/>Scripts]
+    C --> D[Google<br/>Workspace]
+    C --> E[HubSpot<br/>CRM]
+    C --> F[Claude AI<br/>Analysis]
 ```
 
 ## Requirements
