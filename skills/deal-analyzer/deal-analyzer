@@ -1,0 +1,58 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$SCRIPT_DIR/analyzer.py"
+
+# Load environment variables
+if [ -f "$HOME/.env" ]; then
+    . "$HOME/.env"
+fi
+
+ACTION="${1:-help}"
+shift 2>/dev/null
+
+case "$ACTION" in
+    analyze)
+        DECK_URL="${1:-}"
+        PHONE="${2:-}"
+        SENDER_EMAIL="${3:-}"
+        if [ -z "$DECK_URL" ]; then
+            echo "Usage: deal-analyzer analyze <deck-url> [phone] [sender-email]"
+            exit 1
+        fi
+        /usr/bin/python3 "$SCRIPT" analyze "$DECK_URL" "$PHONE" "$SENDER_EMAIL"
+        ;;
+
+    evaluate)
+        DECK_URL="${1:-}"
+        NOTIFY_PHONE="${2:-}"
+        NOTIFY_EMAIL="${3:-}"
+        if [ -z "$DECK_URL" ] || [ -z "$NOTIFY_PHONE" ]; then
+            echo "Usage: deal-analyzer evaluate <deck-url> <phone> [email]"
+            exit 1
+        fi
+        /usr/bin/python3 "$SCRIPT" evaluate "$DECK_URL" "$NOTIFY_PHONE" "$NOTIFY_EMAIL"
+        ;;
+
+    log)
+        PHONE="${1:-}"
+        /usr/bin/python3 "$SCRIPT" log "$PHONE"
+        ;;
+
+    test)
+        /usr/bin/python3 "$SCRIPT" test
+        ;;
+
+    *)
+        echo "Deal Analyzer — AI-powered investment evaluation"
+        echo ""
+        echo "Usage: deal-analyzer <action> [args]"
+        echo ""
+        echo "Actions:"
+        echo "  analyze <URL> [PHONE] [EMAIL]    Quick deck extraction (10s)"
+        echo "  evaluate <URL> <PHONE> [EMAIL]   Full 12-section analysis (3-5 min)"
+        echo "  log [PHONE]                      Log last analysis to HubSpot"
+        echo "  test                             Run test with sample data"
+        exit 0
+        ;;
+esac

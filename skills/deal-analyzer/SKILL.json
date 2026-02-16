@@ -1,0 +1,31 @@
+{
+  "name": "deal-analyzer",
+  "version": "2.0.0",
+  "description": "Deep investment evaluation — 12-section VC analysis from pitch decks",
+  "author": "GroundUp Toolkit",
+  "executables": [
+    {
+      "name": "deal-analyzer",
+      "description": "Analyze pitch decks and run comprehensive investment evaluations",
+      "triggers": [
+        "analyze.*deck",
+        "analyze.*deal",
+        "evaluate.*deck",
+        "evaluate.*deal",
+        "review.*deck",
+        "review.*pitch",
+        "analyze.*pitch",
+        "investment.*analysis",
+        "due.*diligence",
+        "deck.*analysis",
+        "deal.*analysis",
+        "evaluate.*company",
+        "analyze.*startup",
+        "full.*report",
+        "log.*hubspot",
+        "log.*deal",
+        "log.*analysis"
+      ]
+    }
+  ]
+}
