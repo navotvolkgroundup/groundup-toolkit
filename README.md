@@ -17,7 +17,6 @@ Built and battle-tested by [GroundUp Ventures](https://groundup.vc).
 | **Google Workspace** | Calendar, Gmail, and Docs operations via gog CLI |
 | **LinkedIn** | Profile research via MCP bridge |
 | **Keep on Radar** | Monthly review of watchlist deals — researches company updates, sends digests, handles pass/keep/note actions |
-| **Content Writer** | Generate LinkedIn posts, Substack notes, and newsletters in your voice via WhatsApp |
 | **Deal Logger** | Tracks deal discussions from WhatsApp conversations |
 
 Plus operational scripts:
@@ -141,7 +140,6 @@ groundup-toolkit/
 │   ├── ping-teammate/         # Phone call pinger
 │   ├── google-workspace/      # Calendar/Gmail/Docs
 │   ├── keep-on-radar/         # Monthly watchlist review
-│   ├── content-writer/        # Voice-matched content generation
 │   ├── linkedin/              # Profile research
 │   └── deal-logger/           # WhatsApp deal tracking
 ├── scripts/                   # Operational scripts

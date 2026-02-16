@@ -33,7 +33,7 @@ except ImportError:
 GOG_ACCOUNT = config.assistant_email
 WHATSAPP_ACCOUNT = config.whatsapp_account
 MATON_API_KEY = config.maton_api_key
-MATON_BASE_URL = "https://gateway.maton.ai/hubspot"
+MATON_BASE_URL = "https://gateway.maton.ai/hubspot/crm/v3/objects"
 
 # Persistent database path (survives reboots, unlike /tmp)
 _TOOLKIT_ROOT = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -391,7 +391,7 @@ def get_latest_note(company_id):
 
                 # Get note details
                 note_url = f"{MATON_BASE_URL}/notes/{note_id}"
-                note_response = requests.get(note_url, headers=headers, timeout=10)
+                note_response = requests.get(note_url, headers=headers, params={"properties": "hs_note_body"}, timeout=10)
 
                 if note_response.status_code == 200:
                     note_data = note_response.json()

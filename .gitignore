@@ -20,8 +20,8 @@ __pycache__/
 .venv/
 venv/
 
-# Content writer voice/business profiles (personal data)
-skills/content-writer/context/
+# Content writer (private, GroundUp-only — not part of open-source toolkit)
+skills/content-writer/
 
 # Data & state
 data/
