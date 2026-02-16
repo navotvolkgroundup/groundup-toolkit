@@ -19,6 +19,7 @@ import sys
 import os
 import re
 import json
+import shlex
 import time
 import fcntl
 import sqlite3
@@ -447,8 +448,8 @@ def format_whatsapp_summary(owner_first_name, deals_with_research):
 def send_email(to_email, subject, body):
     """Send email using gog CLI with body file."""
     try:
-        body_file = tempfile.mktemp(suffix='.txt')
-        with open(body_file, 'w') as f:
+        fd, body_file = tempfile.mkstemp(suffix='.txt', prefix='radar-email-')
+        with os.fdopen(fd, 'w') as f:
             f.write(body)
 
         cmd = [
@@ -462,7 +463,7 @@ def send_email(to_email, subject, body):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         try:
             os.unlink(body_file)
-        except Exception:
+        except OSError:
             pass
 
         if result.returncode == 0:
@@ -505,10 +506,11 @@ def send_whatsapp(phone, message, max_retries=3, retry_delay=3):
 
 def run_gog_command(cmd):
     """Run gog command with keyring password."""
-    keyring_password = os.environ.get("GOG_KEYRING_PASSWORD", "")
-    full_cmd = f'export GOG_KEYRING_PASSWORD="{keyring_password}" && gog {cmd} --account {GOG_ACCOUNT} --json'
+    env = os.environ.copy()
+    env['GOG_KEYRING_PASSWORD'] = os.environ.get("GOG_KEYRING_PASSWORD", "")
+    full_cmd = f'gog {cmd} --account {shlex.quote(GOG_ACCOUNT)} --json'
     try:
-        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=30, env=env)
         if result.returncode != 0:
             return None
         if result.stdout:
@@ -520,9 +522,14 @@ def run_gog_command(cmd):
 
 def mark_email_processed(thread_id):
     """Add processed label and archive."""
-    keyring_password = os.environ.get("GOG_KEYRING_PASSWORD", "")
-    cmd = f'export GOG_KEYRING_PASSWORD="{keyring_password}" && gog gmail thread modify {thread_id} --account {GOG_ACCOUNT} --add "{PROCESSED_LABEL}" --remove UNREAD --force'
-    subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+    env = os.environ.copy()
+    env['GOG_KEYRING_PASSWORD'] = os.environ.get("GOG_KEYRING_PASSWORD", "")
+    full_cmd = (
+        f'gog gmail thread modify {shlex.quote(thread_id)}'
+        f' --account {shlex.quote(GOG_ACCOUNT)}'
+        f' --add {shlex.quote(PROCESSED_LABEL)} --remove UNREAD --force'
+    )
+    subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=15, env=env)
 
 
 def get_owner_deal_names(owner_email):

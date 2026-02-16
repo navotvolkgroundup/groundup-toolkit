@@ -8,10 +8,12 @@ Enhanced with HubSpot context
 import os
 import sys
 import json
+import shlex
 import subprocess
 import sqlite3
 import fcntl
 import time
+import tempfile
 import requests
 from datetime import datetime, timedelta
 import pytz
@@ -109,8 +111,9 @@ class ReminderDatabase:
 
 def run_gog_command(cmd):
     """Run gog command with keyring password"""
-    keyring_password = os.environ.get("GOG_KEYRING_PASSWORD", "")
-    full_cmd = f'export GOG_KEYRING_PASSWORD="{keyring_password}" && gog {cmd} --account {GOG_ACCOUNT} --json'
+    env = os.environ.copy()
+    env['GOG_KEYRING_PASSWORD'] = os.environ.get("GOG_KEYRING_PASSWORD", "")
+    full_cmd = f'gog {cmd} --account {shlex.quote(GOG_ACCOUNT)} --json'
 
     try:
         result = subprocess.run(
@@ -118,7 +121,8 @@ def run_gog_command(cmd):
             shell=True,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
+            env=env,
         )
 
         if result.returncode != 0:
@@ -221,8 +225,8 @@ def send_email_fallback(to_email, name, message):
         body = f"Hi {name},\n\n{message}\n\n-- {config.assistant_name} (sent via email because WhatsApp was unavailable)"
 
         # Write body to temp file to avoid shell escaping issues
-        body_file = tempfile.mktemp(suffix='.txt')
-        with open(body_file, 'w') as f:
+        fd, body_file = tempfile.mkstemp(suffix='.txt', prefix='reminder-email-')
+        with os.fdopen(fd, 'w') as f:
             f.write(body)
 
         cmd = [
@@ -236,7 +240,7 @@ def send_email_fallback(to_email, name, message):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         try:
             os.unlink(body_file)
-        except:
+        except OSError:
             pass
 
         if result.returncode == 0:

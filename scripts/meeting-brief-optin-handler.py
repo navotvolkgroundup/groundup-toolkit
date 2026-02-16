@@ -6,7 +6,9 @@ Team members can send "opt in" or "opt out" to control meeting briefs
 import os
 import sys
 import json
+import shlex
 import subprocess
+import tempfile
 import re
 from datetime import datetime, timedelta
 
@@ -30,14 +32,16 @@ for m in config.team_members:
 PHONE_TO_EMAIL = {member['phone']: email for email, member in TEAM_MEMBERS.items()}
 
 def run_gog_command(cmd):
-    full_cmd = f'source ~/.profile && export GOG_KEYRING_PASSWORD="{config.gog_keyring_password}" && gog {cmd} --account {GOG_ACCOUNT} --json'
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash")
+    env = os.environ.copy()
+    env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
+    full_cmd = f'source ~/.profile && gog {cmd} --account {shlex.quote(GOG_ACCOUNT)} --json'
+    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash", env=env)
     if result.returncode != 0:
         print(f"Error running gog: {result.stderr}", file=sys.stderr)
         return None
     try:
         return json.loads(result.stdout)
-    except:
+    except Exception:
         return result.stdout
 
 def get_current_status(email):
@@ -67,24 +71,49 @@ def set_opt_in(email, opted_in):
 
 def send_whatsapp(phone, message):
     """Send WhatsApp message"""
-    message_escaped = message.replace("'", "'\\''")
-    cmd = f"openclaw message send --channel whatsapp --account {WHATSAPP_ACCOUNT} --target '{phone}' --message '{message_escaped}'"
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    cmd = [
+        'openclaw', 'message', 'send',
+        '--channel', 'whatsapp',
+        '--account', WHATSAPP_ACCOUNT,
+        '--target', phone,
+        '--message', message
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
     return result.returncode == 0
 
 def send_email(to_email, subject, body):
     """Send email via gog"""
-    body_escaped = body.replace("'", "'\\''")
-    subject_escaped = subject.replace("'", "'\\''")
-    cmd = f"gog gmail send --to '{to_email}' --subject '{subject_escaped}' --body '{body_escaped}' --account {GOG_ACCOUNT}"
-    full_cmd = f'source ~/.profile && export GOG_KEYRING_PASSWORD="{config.gog_keyring_password}" && {cmd}'
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash")
-    return result.returncode == 0
+    fd, body_path = tempfile.mkstemp(suffix='.txt', prefix='optin-email-')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(body)
+        env = os.environ.copy()
+        env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
+        full_cmd = (
+            f'source ~/.profile && gog gmail send'
+            f' --to {shlex.quote(to_email)}'
+            f' --subject {shlex.quote(subject)}'
+            f' --body-file {shlex.quote(body_path)}'
+            f' --account {shlex.quote(GOG_ACCOUNT)}'
+        )
+        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash", env=env)
+        return result.returncode == 0
+    finally:
+        try:
+            os.unlink(body_path)
+        except OSError:
+            pass
 
 def mark_email_processed(thread_id):
     """Mark email as processed"""
-    full_cmd = f'source ~/.profile && export GOG_KEYRING_PASSWORD="{config.gog_keyring_password}" && gog gmail thread modify {thread_id} --account {GOG_ACCOUNT} --add "{PROCESSED_LABEL}" --remove UNREAD,INBOX --force'
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash")
+    env = os.environ.copy()
+    env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
+    full_cmd = (
+        f'source ~/.profile && gog gmail thread modify {shlex.quote(thread_id)}'
+        f' --account {shlex.quote(GOG_ACCOUNT)}'
+        f' --add {shlex.quote(PROCESSED_LABEL)} --remove UNREAD,INBOX --force'
+    )
+    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash", env=env)
     return result.returncode == 0
 
 def check_whatsapp_messages():
