@@ -96,8 +96,7 @@ Pitch deck content:
         headers = {
             'x-api-key': ANTHROPIC_API_KEY,
             'anthropic-version': '2023-06-01',
-            'content-type': 'application/json',
-            'anthropic-dangerous-direct-browser-access': 'true'
+            'content-type': 'application/json'
         }
 
         payload = {
