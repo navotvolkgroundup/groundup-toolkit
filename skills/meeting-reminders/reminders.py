@@ -71,12 +71,22 @@ class ReminderDatabase:
         """Initialize database"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+
+        # Check if table exists with old schema (event_id-only PK).
+        # The old PK caused INSERT OR REPLACE to overwrite rows for
+        # different team members sharing the same event, breaking dedup.
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='notified_meetings'")
+        row = cursor.fetchone()
+        if row and 'PRIMARY KEY (event_id, email)' not in row[0]:
+            cursor.execute('DROP TABLE notified_meetings')
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS notified_meetings (
-                event_id TEXT PRIMARY KEY,
+                event_id TEXT NOT NULL,
                 email TEXT NOT NULL,
                 notified_at TEXT NOT NULL,
-                meeting_start TEXT NOT NULL
+                meeting_start TEXT NOT NULL,
+                PRIMARY KEY (event_id, email)
             )
         ''')
         # Clean up old notifications (older than 24 hours)
