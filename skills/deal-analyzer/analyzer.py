@@ -268,28 +268,32 @@ ALLOWED_DECK_DOMAINS = {
 
 def is_safe_url(url):
     """Validate URL against allowed domains to prevent SSRF."""
+    import ipaddress
+    import socket
     try:
         from urllib.parse import urlparse
         parsed = urlparse(url)
         if parsed.scheme not in ('http', 'https'):
             return False
         hostname = parsed.hostname or ''
-        # Block private/internal IPs
-        if hostname in ('localhost', '127.0.0.1', '0.0.0.0', '::1'):
+        if not hostname:
             return False
-        # Block AWS metadata endpoint
-        if hostname.startswith('169.254.'):
+
+        # Check hostname against allowed domains first
+        if not any(hostname == d or hostname.endswith('.' + d) for d in ALLOWED_DECK_DOMAINS):
             return False
-        # Block internal ranges
-        if hostname.startswith(('10.', '192.168.', '172.')):
+
+        # Resolve hostname and verify all IPs are public (prevents DNS rebinding)
+        try:
+            addrinfos = socket.getaddrinfo(hostname, None)
+            for family, _, _, _, sockaddr in addrinfos:
+                ip = ipaddress.ip_address(sockaddr[0])
+                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                    return False
+        except (socket.gaierror, ValueError):
             return False
-        # Allow known deck hosting domains or any .pdf URL on public hosts
-        if any(hostname == d or hostname.endswith('.' + d) for d in ALLOWED_DECK_DOMAINS):
-            return True
-        # Allow direct PDF links on any public domain
-        if parsed.path.lower().endswith('.pdf'):
-            return True
-        return False
+
+        return True
     except Exception:
         return False
 
