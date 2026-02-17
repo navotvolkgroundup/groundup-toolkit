@@ -19,13 +19,14 @@ if [ ! -f "$TEAM_JSON" ]; then
     # Auto-generate team-phones.json from config.yaml if possible
     if [ -f "${TOOLKIT_ROOT}/config.yaml" ]; then
         python3 -c "
-import yaml, json
-c = yaml.safe_load(open('${TOOLKIT_ROOT}/config.yaml'))
+import yaml, json, sys
+config_path, out_path = sys.argv[1], sys.argv[2]
+c = yaml.safe_load(open(config_path))
 members = c.get('team', {}).get('members', [])
 name_to_phone = {m['name'].lower(): m['phone'] for m in members}
 phone_to_name = {m['phone']: m['name'] for m in members}
-json.dump({'name_to_phone': name_to_phone, 'phone_to_name': phone_to_name}, open('${TEAM_JSON}', 'w'), indent=2)
-" 2>/dev/null
+json.dump({'name_to_phone': name_to_phone, 'phone_to_name': phone_to_name}, open(out_path, 'w'), indent=2)
+" "$TOOLKIT_ROOT/config.yaml" "$TEAM_JSON" 2>/dev/null
     fi
 fi
 
@@ -48,8 +49,8 @@ fi
 TARGET_LOWER=$(echo "$TARGET_NAME" | tr '[:upper:]' '[:lower:]')
 
 # Look up team members from generated JSON
-TARGET_PHONE=$(python3 -c "import json; d=json.load(open('${TEAM_JSON}')); print(d['name_to_phone'].get('${TARGET_LOWER}', ''))" 2>/dev/null || echo "")
-SENDER_NAME=$(python3 -c "import json; d=json.load(open('${TEAM_JSON}')); print(d['phone_to_name'].get('${SENDER_PHONE}', ''))" 2>/dev/null || echo "")
+TARGET_PHONE=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d['name_to_phone'].get(sys.argv[2], ''))" "$TEAM_JSON" "$TARGET_LOWER" 2>/dev/null || echo "")
+SENDER_NAME=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d['phone_to_name'].get(sys.argv[2], ''))" "$TEAM_JSON" "$SENDER_PHONE" 2>/dev/null || echo "")
 
 # Validate sender is a team member
 if [ -z "$SENDER_NAME" ]; then
@@ -59,7 +60,7 @@ fi
 
 # Look up target phone
 if [ -z "$TARGET_PHONE" ]; then
-    VALID_NAMES=$(python3 -c "import json; d=json.load(open('${TEAM_JSON}')); print(', '.join(n.title() for n in d['name_to_phone'].keys()))" 2>/dev/null || echo "(check team-phones.json)")
+    VALID_NAMES=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(', '.join(n.title() for n in d['name_to_phone'].keys()))" "$TEAM_JSON" 2>/dev/null || echo "(check team-phones.json)")
     echo "ERROR: Unknown team member '$TARGET_NAME'. Valid names: $VALID_NAMES"
     exit 1
 fi
@@ -75,14 +76,21 @@ TARGET_PROPER="${TARGET_NAME^}"
 
 echo "Calling $TARGET_PROPER now..."
 
+# XML-escape names to prevent TwiML injection
+xml_escape() {
+    echo "$1" | python3 -c "import sys,html; print(html.escape(sys.stdin.read().strip()))"
+}
+SAFE_TARGET=$(xml_escape "$TARGET_PROPER")
+SAFE_SENDER=$(xml_escape "$SENDER_NAME")
+
 # Call via Twilio
-TWIML="<Response><Say voice=\"alice\">Hey ${TARGET_PROPER}, ${SENDER_NAME} is trying to reach you. Please check your WhatsApp or join the meeting. This is urgent.</Say><Pause length=\"2\"/><Say voice=\"alice\">Again, ${TARGET_PROPER}, ${SENDER_NAME} needs you right now. Please respond.</Say></Response>"
+TWIML="<Response><Say voice=\"alice\">Hey ${SAFE_TARGET}, ${SAFE_SENDER} is trying to reach you. Please check your WhatsApp or join the meeting. This is urgent.</Say><Pause length=\"2\"/><Say voice=\"alice\">Again, ${SAFE_TARGET}, ${SAFE_SENDER} needs you right now. Please respond.</Say></Response>"
 
 RESPONSE=$(curl -s -X POST \
     "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json" \
     -u "${TWILIO_API_KEY_SID}:${TWILIO_API_KEY_SECRET}" \
-    -d "To=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$TARGET_PHONE'))")" \
-    -d "From=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$TWILIO_FROM_NUMBER'))")" \
+    -d "To=$(python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))" "$TARGET_PHONE")" \
+    -d "From=$(python3 -c "import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))" "$TWILIO_FROM_NUMBER")" \
     --data-urlencode "Twiml=${TWIML}")
 
 # Extract call SID

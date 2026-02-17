@@ -11,6 +11,8 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
         const browser = await puppeteer.launch({
             headless: false,  // Run visible so we can see what's happening
             executablePath: '/usr/bin/chromium-browser',
+            // NOTE: --no-sandbox required when running as root. URL validation in
+            // join-meeting + camofox-join.js mitigates SSRF risk. Long-term: use Docker.
             args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
 
@@ -36,7 +38,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
         const cookies = await page.cookies();
         const path = require('path');
         const cookiesPath = path.join(__dirname, 'google-cookies.json');
-        fs.writeFileSync(cookiesPath, JSON.stringify(cookies, null, 2));
+        fs.writeFileSync(cookiesPath, JSON.stringify(cookies, null, 2), { mode: 0o600 });
 
         console.log('✅ Authentication saved!');
         console.log('Cookies saved to: ' + cookiesPath);

@@ -24,6 +24,15 @@ if [[ ! "$MEETING_URL" =~ ^https:// ]]; then
     MEETING_URL="https://$MEETING_URL"
 fi
 
+# Validate meeting URL against allowed providers (prevent SSRF)
+ALLOWED_DOMAINS="meet.google.com|zoom.us|teams.microsoft.com|teams.live.com"
+URL_HOST=$(echo "$MEETING_URL" | python3 -c "import sys; from urllib.parse import urlparse; print(urlparse(sys.stdin.read().strip()).hostname or '')")
+if [[ ! "$URL_HOST" =~ ^($ALLOWED_DOMAINS)$ ]]; then
+    echo "❌ Error: Invalid meeting URL domain: $URL_HOST"
+    echo "Allowed: meet.google.com, zoom.us, teams.microsoft.com"
+    exit 1
+fi
+
 echo "🦊 Joining Google Meet with Camofox..."
 echo "Meeting: $MEETING_URL"
 echo ""

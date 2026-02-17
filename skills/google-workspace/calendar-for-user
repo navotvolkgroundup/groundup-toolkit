@@ -22,14 +22,14 @@ fi
 # Use Python config loader to resolve phone -> email
 EMAIL=$(python3 -c "
 import sys, os
-sys.path.insert(0, '$TOOLKIT_ROOT')
+sys.path.insert(0, sys.argv[1])
 from lib.config import config
-m = config.get_member_by_phone('$PHONE')
+m = config.get_member_by_phone(sys.argv[2])
 if m:
     print(m['email'])
 else:
     sys.exit(1)
-" 2>/dev/null)
+" "$TOOLKIT_ROOT" "$PHONE" 2>/dev/null)
 
 if [ -z "$EMAIL" ]; then
     echo "Error: Phone number $PHONE not recognized"

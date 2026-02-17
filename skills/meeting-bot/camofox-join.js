@@ -45,9 +45,30 @@ const META_PATH = process.argv[3] || null;
 const COOKIES_PATH = path.join(__dirname, "google-cookies.json");
 const SCREENSHOT_DIR = "/tmp";
 
+// Allowed meeting provider domains (prevent SSRF)
+const ALLOWED_DOMAINS = new Set([
+    "meet.google.com",
+    "zoom.us",
+    "teams.microsoft.com",
+    "teams.live.com",
+]);
+
 if (!MEETING_URL) {
     console.error("Error: No meeting URL provided");
     console.error("Usage: node camofox-join.js <meeting-url> [metadata-file]");
+    process.exit(1);
+}
+
+// Validate meeting URL domain
+try {
+    const meetingHost = new URL(MEETING_URL).hostname;
+    if (!ALLOWED_DOMAINS.has(meetingHost)) {
+        console.error("Error: Invalid meeting URL domain: " + meetingHost);
+        console.error("Allowed domains: " + Array.from(ALLOWED_DOMAINS).join(", "));
+        process.exit(1);
+    }
+} catch (e) {
+    console.error("Error: Invalid meeting URL: " + e.message);
     process.exit(1);
 }
 
@@ -199,7 +220,7 @@ let screenshot_global = async () => {};
  * Uses curl + Twilio REST API with API Key auth.
  * Env vars: TWILIO_ACCOUNT_SID, TWILIO_API_KEY_SID, TWILIO_API_KEY_SECRET, TWILIO_FROM_NUMBER
  */
-function twilioCall(phone, personName, meetingTitle) {
+async function twilioCall(phone, personName, meetingTitle) {
     try {
         const accountSid = process.env.TWILIO_ACCOUNT_SID;
         const apiKey = process.env.TWILIO_API_KEY_SID;
@@ -215,14 +236,40 @@ function twilioCall(phone, personName, meetingTitle) {
         const safeTitle = xmlEscape(meetingTitle);
         const twiml = `<Response><Say voice="alice">Hey ${safeName}, you are late to ${safeTitle}. Everyone is waiting for you. Please join now.</Say><Pause length="2"/><Say voice="alice">Again, ${safeName}, please join ${safeTitle} right now.</Say></Response>`;
 
-        const cmd = `curl -s -X POST "https://api.twilio.com/2010-04-01/Accounts/${shellEscape(accountSid)}/Calls.json" ` +
-            `-u ${shellEscape(apiKey + ":" + apiSecret)} ` +
-            `-d "To=${encodeURIComponent(phone)}" ` +
-            `-d "From=${encodeURIComponent(fromNumber)}" ` +
-            `--data-urlencode "Twiml=${twiml.replace(/"/g, '\\"')}"`;
-
         console.log("Attendance: Calling " + personName + " at " + phone + " via Twilio");
-        const result = execSync(cmd, { timeout: 30000, stdio: "pipe" }).toString();
+
+        // Use Node.js https instead of execSync+curl to avoid shell injection
+        const https = require("https");
+        const querystring = require("querystring");
+        const postData = querystring.stringify({
+            To: phone,
+            From: fromNumber,
+            Twiml: twiml,
+        });
+        const auth = Buffer.from(apiKey + ":" + apiSecret).toString("base64");
+        const options = {
+            hostname: "api.twilio.com",
+            path: `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Calls.json`,
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": "Basic " + auth,
+                "Content-Length": Buffer.byteLength(postData),
+            },
+            timeout: 30000,
+        };
+
+        const result = await new Promise((resolve) => {
+            const req = https.request(options, (res) => {
+                let body = "";
+                res.on("data", (chunk) => body += chunk);
+                res.on("end", () => resolve(body));
+            });
+            req.on("error", (err) => resolve(JSON.stringify({ message: err.message })));
+            req.on("timeout", () => { req.destroy(); resolve(JSON.stringify({ message: "timeout" })); });
+            req.write(postData);
+            req.end();
+        });
 
         try {
             const resp = JSON.parse(result);
@@ -831,7 +878,7 @@ function getExpectedAttendees() {
                             console.log("Attendance: " + member.name + " STILL missing at +5 min - escalating");
 
                             // Call them via Twilio
-                            twilioCall(member.phone, member.name, meetingTitle);
+                            await twilioCall(member.phone, member.name, meetingTitle);
 
                             // Send Google Meet invite notification
                             await inviteIntoMeeting(page, member.email, member.name);

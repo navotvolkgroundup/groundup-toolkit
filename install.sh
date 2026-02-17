@@ -73,7 +73,7 @@ echo "[3/7] Installing OpenClaw..."
 if command -v openclaw &> /dev/null; then
     echo "  OpenClaw already installed: $(openclaw --version)"
 else
-    npm install -g openclaw
+    npm install -g --ignore-scripts openclaw
     echo "  Installed: $(openclaw --version)"
 fi
 
@@ -82,7 +82,7 @@ echo "[4/7] Installing gog CLI (Google Workspace)..."
 if command -v gog &> /dev/null; then
     echo "  gog already installed"
 else
-    npm install -g gog
+    npm install -g --ignore-scripts gog
     echo "  Installed gog CLI"
 fi
 
@@ -103,7 +103,7 @@ echo ""
 echo "[6/7] Installing Node.js dependencies for meeting-bot..."
 if [ -d "$TOOLKIT_DIR/skills/meeting-bot" ] && [ -f "$TOOLKIT_DIR/skills/meeting-bot/package.json" ]; then
     cd "$TOOLKIT_DIR/skills/meeting-bot"
-    npm install --quiet 2>/dev/null
+    npm install --quiet --ignore-scripts 2>/dev/null
     cd "$TOOLKIT_DIR"
     echo "  Done."
 else
@@ -113,16 +113,21 @@ fi
 # Install js-yaml for any scripts that need YAML config parsing in Node.js
 echo "  Installing js-yaml (YAML parser for Node.js config loader)..."
 cd "$TOOLKIT_DIR"
-npm install --save js-yaml 2>/dev/null
+npm install --save --ignore-scripts js-yaml 2>/dev/null
 echo "  Done."
 
 echo ""
 echo "[7/7] Setting up environment..."
 
-# Source .env
-set -a
-source "$TOOLKIT_DIR/.env"
-set +a
+# Load .env safely (line-by-line, no command substitution execution)
+while IFS='=' read -r key value; do
+    # Skip comments and blank lines
+    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+    # Strip leading/trailing whitespace from key
+    key=$(echo "$key" | xargs)
+    # Only export valid variable names
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] && export "$key=$value"
+done < "$TOOLKIT_DIR/.env"
 
 # Make scripts executable
 chmod +x "$TOOLKIT_DIR/skills/"*/[a-z]* 2>/dev/null || true
