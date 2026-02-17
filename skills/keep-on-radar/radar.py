@@ -554,7 +554,9 @@ AVAILABLE DEALS (name -> HubSpot deal ID):
 {json.dumps(owner_deals, indent=2)}
 
 REPLY TEXT:
+<document>
 {reply_text}
+</document>
 
 For each deal mentioned, extract the action. Return ONLY a valid JSON array:
 [

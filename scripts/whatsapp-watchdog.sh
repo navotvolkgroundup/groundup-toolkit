@@ -15,7 +15,12 @@
 #   TWILIO_FROM_NUMBER       - Twilio caller ID number (optional)
 
 set +e
-source "$HOME/.env" 2>/dev/null || true
+# Safe .env loading (no shell execution)
+while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+    key=$(echo "$key" | xargs)
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] && export "$key=$value"
+done < "$HOME/.env" 2>/dev/null || true
 
 TIMESTAMP=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 ASSISTANT_PHONE="${ASSISTANT_WHATSAPP_PHONE:-+1234567890}"
@@ -81,8 +86,8 @@ send_alert() {
 
         curl -s -X POST "https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Calls.json" \
             --netrc-file "$_twilio_netrc" \
-            -d "To=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$ALERT_PHONE'))")" \
-            -d "From=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$TWILIO_FROM_NUMBER'))")" \
+            -d "To=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$ALERT_PHONE")" \
+            -d "From=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$TWILIO_FROM_NUMBER")" \
             --data-urlencode "Twiml=$twiml" > /dev/null 2>&1
 
         rm -f "$_twilio_netrc"
