@@ -3,9 +3,13 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$SCRIPT_DIR/reminders.py"
 
-# Load environment variables
+# Safe .env loading (no shell execution)
 if [ -f "$HOME/.env" ]; then
-    . "$HOME/.env"
+    while IFS='=' read -r key value; do
+        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+        key=$(echo "$key" | xargs)
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] && export "$key=$value"
+    done < "$HOME/.env"
 fi
 
 # Parse action

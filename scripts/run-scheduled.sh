@@ -56,8 +56,12 @@ fi
 echo "  ✓ Time check passed - running processor"
 echo ""
 
-# Source environment and run
-source "$ENV_FILE"
-source "$PROFILE_FILE"
+# Safe .env loading (no shell execution)
+while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+    key=$(echo "$key" | xargs)
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] && export "$key=$value"
+done < "$ENV_FILE" 2>/dev/null || true
+. "$PROFILE_FILE" 2>/dev/null || true
 cd "$SCHEDULER_DIR"
 node dist/index.js

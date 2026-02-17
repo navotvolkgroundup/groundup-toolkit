@@ -11,7 +11,12 @@
 set +e
 
 # Environment
-source "$HOME/.env" 2>/dev/null || true
+# Safe .env loading (no shell execution)
+while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+    key=$(echo "$key" | xargs)
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] && export "$key=$value"
+done < "$HOME/.env" 2>/dev/null || true
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 
@@ -38,7 +43,7 @@ fail() {
 send_alert() {
     local subject="$1"
     local body="$2"
-    source ~/.profile 2>/dev/null || true
+    . ~/.profile 2>/dev/null || true
     export GOG_KEYRING_PASSWORD="${GOG_KEYRING_PASSWORD}"
     gog gmail send --to "$ALERT_EMAIL" --subject "$subject" --body "$body" --account "$GOG_ACCOUNT" 2>/dev/null || true
     log "Alert email sent to $ALERT_EMAIL"

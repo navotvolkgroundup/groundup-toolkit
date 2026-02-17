@@ -460,9 +460,10 @@ def format_research_for_section(research_results, relevant_keys):
     parts = []
     for key in relevant_keys:
         items = research_results.get(key, [])
-        if items:
-            for item in items[:4]:
-                parts.append(f"- {item['title']}: {item['description']}")
+        if not items:
+            continue
+        for item in items[:4]:
+            parts.append(f"- {item['title']}: {item['description']}")
     if not parts:
         return "No relevant research data available."
     return '\n'.join(parts)

@@ -49,7 +49,7 @@ def get_current_status(email):
     with open(SCRIPT_PATH, 'r') as f:
         content = f.read()
 
-    pattern = rf"'{email}':\s*{{[^}}]*'opted_in':\s*(True|False)"
+    pattern = rf"'{re.escape(email)}':\s*{{[^}}]*'opted_in':\s*(True|False)"
     match = re.search(pattern, content)
     if match:
         return match.group(1) == 'True'
@@ -60,12 +60,18 @@ def set_opt_in(email, opted_in):
     with open(SCRIPT_PATH, 'r') as f:
         content = f.read()
 
-    pattern = rf"('{email}':\s*{{[^}}]*'opted_in':\s*)(True|False)"
+    pattern = rf"('{re.escape(email)}':\s*{{[^}}]*'opted_in':\s*)(True|False)"
     replacement = rf"\g<1>{opted_in}"
     new_content = re.sub(pattern, replacement, content)
 
-    with open(SCRIPT_PATH, 'w') as f:
-        f.write(new_content)
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(SCRIPT_PATH))
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(new_content)
+        os.replace(tmp_path, SCRIPT_PATH)
+    except:
+        os.unlink(tmp_path)
+        raise
 
     return True
 
