@@ -15,8 +15,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-web-security'
+                '--disable-blink-features=AutomationControlled'
             ]
         });
 

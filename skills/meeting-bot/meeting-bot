@@ -9,6 +9,7 @@ extracts action items with Claude AI, and emails summaries to the team.
 import os
 import sys
 import json
+import shlex
 import subprocess
 from datetime import datetime, timedelta
 import requests
@@ -26,7 +27,7 @@ TEAM_MEMBERS = {m['email']: m['name'].split()[0] for m in config.team_members}
 
 def run_gog_command(cmd):
     """Run gog command with authentication"""
-    full_cmd = f'gog {cmd} --account {GOG_ACCOUNT} --json'
+    full_cmd = f'gog {cmd} --account {shlex.quote(GOG_ACCOUNT)} --json'
     result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable='/bin/bash')
     if result.returncode != 0:
         print(f'Error running gog: {result.stderr}')

@@ -866,7 +866,14 @@ def fetch_deck_with_browser(url, sender_email):
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
         }
 
-        response = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+        response = requests.get(url, headers=headers, timeout=30, allow_redirects=False)
+        # Validate redirects don't point to internal hosts
+        if response.status_code in (301, 302, 303, 307, 308):
+            redirect_url = response.headers.get('Location', '')
+            if not is_safe_url(redirect_url):
+                print(f'    Security: blocked redirect to disallowed URL: {redirect_url}', file=sys.stderr)
+                return None
+            response = requests.get(redirect_url, headers=headers, timeout=30, allow_redirects=False)
         if response.status_code == 200:
             return response.text
         else:

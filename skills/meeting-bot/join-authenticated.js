@@ -15,7 +15,6 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
                 '--use-fake-ui-for-media-stream',
                 '--use-fake-device-for-media-stream',
                 '--disable-blink-features=AutomationControlled',
-                '--disable-web-security',
                 '--disable-dev-shm-usage',
                 '--disable-gpu'
             ]

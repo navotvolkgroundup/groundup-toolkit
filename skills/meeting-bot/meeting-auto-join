@@ -11,6 +11,7 @@ can monitor attendance.
 import os
 import sys
 import json
+import shlex
 import subprocess
 import re
 from datetime import datetime, timedelta, timezone
@@ -50,7 +51,7 @@ def get_upcoming_meetings():
     cmd = (
         f'source "$HOME/.env" && '
         f'gog calendar events --today '
-        f'--account {GOG_ACCOUNT} --json'
+        f'--account {shlex.quote(GOG_ACCOUNT)} --json'
     )
     try:
         result = subprocess.run(
