@@ -1,0 +1,46 @@
+{
+  "_meta": {
+    "type": "audience_profile",
+    "version": "1.0",
+    "description": "Target audience profile — who this person writes for and what they care about"
+  },
+  "data": {
+    "identity": {
+      "description": "Brief description of the target audience in their native language",
+      "description_english": "Brief description of the target audience in English",
+      "stage": "career/business stage (e.g., early-stage founders, mid-career professionals)",
+      "experience_level": "junior / mid / senior / executive",
+      "geography": "primary regions (e.g., Israel, US, global)"
+    },
+    "pain_points": {
+      "primary_problem": "The #1 problem in their native language",
+      "primary_problem_english": "The #1 problem this audience faces",
+      "secondary_problems": ["Other problems in their native language"],
+      "secondary_problems_english": [
+        "Second biggest problem",
+        "Third problem",
+        "Fourth problem"
+      ]
+    },
+    "aspirations": {
+      "dream_outcome": "What success looks like in their native language",
+      "dream_outcome_english": "What success looks like for this audience",
+      "short_term_goals": ["Near-term goals"],
+      "long_term_goals": ["Long-term aspirations"]
+    },
+    "language_patterns": {
+      "problem_language": [
+        "How they describe their problems in their own words",
+        "The phrases they use when venting about challenges"
+      ],
+      "goal_language": [
+        "How they describe what they want"
+      ]
+    },
+    "decision_criteria": {
+      "what_they_evaluate": ["What matters to them when choosing"],
+      "green_flags": ["Signals that build trust"],
+      "red_flags": ["Signals that break trust"]
+    }
+  }
+}

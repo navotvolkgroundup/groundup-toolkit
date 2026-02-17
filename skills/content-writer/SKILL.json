@@ -1,0 +1,45 @@
+{
+  "name": "content-writer",
+  "version": "1.2.0",
+  "description": "Generate content in each team member's voice with adaptive voice learning",
+  "author": "GroundUp Toolkit",
+  "executables": [
+    {
+      "name": "content-writer",
+      "description": "Generate written content, collect voice samples, and learn writing style",
+      "triggers": [
+        "write.*post",
+        "write.*note",
+        "write.*article",
+        "write.*newsletter",
+        "write.*thread",
+        "write.*essay",
+        "draft.*post",
+        "draft.*note",
+        "draft.*article",
+        "draft.*newsletter",
+        "linkedin.*post",
+        "substack.*note",
+        "write.*about",
+        "content.*about",
+        "linkedin.*message",
+        "linkedin.*dm",
+        "linkedin.*outreach",
+        "write.*message",
+        "reach.*out",
+        "intro.*message",
+        "dm.*to",
+        "voice.*sample",
+        "learn.*voice",
+        "my.*writing.*style",
+        "here.*my.*writing",
+        "^keep$",
+        "^keep (that|it|this)$",
+        "^save (that|it|this)$",
+        "^my voice$",
+        "^voice.?status$",
+        "^voice.?profile$"
+      ]
+    }
+  ]
+}

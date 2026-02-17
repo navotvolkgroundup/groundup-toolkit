@@ -1,0 +1,43 @@
+{
+  "_meta": {
+    "type": "brand_profile",
+    "version": "1.0",
+    "description": "Brand/business profile — positioning, offerings, and content philosophy"
+  },
+  "data": {
+    "basic_info": {
+      "name": "Your Company Name",
+      "tagline": "Tagline in native language",
+      "tagline_english": "Your company tagline in English"
+    },
+    "positioning": {
+      "unique_angle": "What makes you different in native language",
+      "unique_angle_english": "What makes you different from competitors",
+      "core_philosophy": "Your fundamental belief about the industry in native language",
+      "core_philosophy_english": "Your fundamental belief about the industry"
+    },
+    "differentiators": [
+      {
+        "english": "First differentiator — what you do that others don't",
+        "hebrew": "Optional: same in Hebrew"
+      },
+      {
+        "english": "Second differentiator",
+        "hebrew": "Optional: same in Hebrew"
+      }
+    ],
+    "tone": {
+      "attributes": [
+        "direct",
+        "skeptical",
+        "data-driven",
+        "no-hype"
+      ]
+    },
+    "content_philosophy": {
+      "beliefs": ["What you believe about content in your industry"],
+      "stands_for": ["Ideas you champion"],
+      "stands_against": ["Ideas you push back on"]
+    }
+  }
+}

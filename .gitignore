@@ -20,8 +20,9 @@ __pycache__/
 .venv/
 venv/
 
-# Content writer (private, GroundUp-only — not part of open-source toolkit)
-skills/content-writer/
+# Content writer — private voice profiles (actual team member data stays out of git)
+skills/content-writer/profiles/*/
+!skills/content-writer/profiles/example/
 
 # Data & state
 data/

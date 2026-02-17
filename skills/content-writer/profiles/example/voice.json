@@ -1,0 +1,70 @@
+{
+  "_meta": {
+    "type": "voice_profile",
+    "version": "1.0",
+    "description": "Voice DNA profile — defines how this person writes and communicates"
+  },
+  "data": {
+    "voice_dna": {
+      "core_essence": {
+        "en": "A brief description of who this person is as a communicator — their defining quality, what makes their perspective unique"
+      },
+      "worldview": {
+        "en": "What this person believes about the world and their domain — their fundamental lens for interpreting events"
+      },
+      "emotional_palette": [
+        "primary emotional tone (e.g., skeptical but curious)",
+        "secondary tone (e.g., amused by absurdity)",
+        "third tone (e.g., direct without being harsh)"
+      ],
+      "social_positioning": {
+        "en": "How this person positions themselves in conversations — insider, outsider, observer, contrarian, etc."
+      }
+    },
+    "communication_style": {
+      "thought_progression": {
+        "en": "How ideas flow — e.g., concrete observation to broader insight, question to exploration to conclusion"
+      },
+      "complexity_preference": {
+        "en": "Simple language for sophisticated observations, or technical depth, or academic, etc."
+      },
+      "conviction_spectrum": {
+        "typical_balance": {
+          "en": "How decisive vs. hedged — e.g., decisive on observations, measured on predictions"
+        }
+      }
+    },
+    "linguistic_fingerprint": {
+      "sentence_architecture": {
+        "typical_patterns": [
+          "Short declarative. Then expansion.",
+          "Not X. But Y.",
+          "Single sentence paragraphs for emphasis"
+        ]
+      },
+      "vocabulary_tendencies": {
+        "signature_colloquialisms": [
+          "phrases this person uses naturally (e.g., 'the simple truth is', 'money on the floor')"
+        ]
+      },
+      "code_switching": {
+        "hebrew_english_patterns": {
+          "en": "How and when they switch between languages (remove this section if monolingual)"
+        }
+      }
+    },
+    "voice_boundaries": {
+      "never_sounds_like": [
+        "management consultant speak",
+        "breathless hype",
+        "corporate press release",
+        "motivational speaker energy"
+      ],
+      "always_sounds_like": [
+        "someone who has been in the room",
+        "pattern spotter, not preacher",
+        "direct and opinionated"
+      ]
+    }
+  }
+}

@@ -95,6 +95,50 @@ LinkedIn profile research via MCP bridge. Requires LinkedIn authentication cooki
 
 ---
 
+## Content Writer
+
+**Path**: `skills/content-writer/`
+
+Generates written content (LinkedIn posts, Substack notes, LinkedIn messages, newsletters) in team members' authentic voice. Uses per-member voice profiles, audience data, brand context, and Brave web research. Includes a humanizer pass to strip AI writing patterns.
+
+**How it works**:
+1. Team member sends a WhatsApp message like "write a LinkedIn post about X"
+2. OpenClaw matches the trigger and calls `content-writer generate "<message>" "<phone>"`
+3. The skill detects content type, selects the member's voice profile, runs web research on the topic, generates with Claude Sonnet, then humanizes the output
+4. Delivers via WhatsApp (short-form) or WhatsApp preview + email (newsletters)
+
+**Content types**:
+- **LinkedIn post** — 150-300 words, direct, insight-driven. Trigger: "write a post about..."
+- **LinkedIn message** — 2-5 sentences, warm and direct outreach. Trigger: "write a LinkedIn message to..."
+- **Substack note** — 1-10 sentences, punchy, single-insight. Trigger: "write a note about..."
+- **Newsletter/article** — 800-1500 words, long-form. Trigger: "write a newsletter about..."
+
+**Trigger examples** (via WhatsApp):
+```
+write a LinkedIn post about why most VC content is boring
+draft a post about founder red flags I've seen
+write a LinkedIn message to the CTO of Acme about our AI infra thesis
+write a note about the state of AI infra
+write a newsletter about what seed-stage founders get wrong about GTM
+```
+
+Hebrew messages work — output will be in Hebrew with English tech terms.
+
+**Manual usage** (on server):
+```bash
+# Generate content from a message
+~/.openclaw/skills/content-writer/content-writer generate "write a post about X" "+972..."
+
+# Run test (sends a LinkedIn post to the alert phone)
+~/.openclaw/skills/content-writer/content-writer test
+```
+
+**Per-member profiles**: `profiles/<name>/` contains `voice.json`, `audience.json`, and `brand.json` for each team member. See `profiles/example/` for templates.
+
+**Requires**: `ANTHROPIC_API_KEY`, `BRAVE_API_KEY` (for research)
+
+---
+
 ## Deal Logger
 
 **Path**: `skills/deal-logger/`

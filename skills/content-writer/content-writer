@@ -1,0 +1,39 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$SCRIPT_DIR/writer.py"
+
+# Load environment variables
+if [ -f "$HOME/.env" ]; then
+    . "$HOME/.env"
+fi
+
+ACTION="${1:-help}"
+shift 2>/dev/null
+
+case "$ACTION" in
+    generate)
+        MESSAGE="${1:-}"
+        SENDER_PHONE="${2:-}"
+        if [ -z "$MESSAGE" ] || [ -z "$SENDER_PHONE" ]; then
+            echo "Usage: content-writer generate <message> <sender-phone>"
+            exit 1
+        fi
+        /usr/bin/python3 "$SCRIPT" generate "$MESSAGE" "$SENDER_PHONE"
+        ;;
+
+    test)
+        /usr/bin/python3 "$SCRIPT" test
+        ;;
+
+    *)
+        echo "Content Writer — Generate content via WhatsApp"
+        echo ""
+        echo "Usage: content-writer <action> [args]"
+        echo ""
+        echo "Actions:"
+        echo "  generate <message> <phone>  Generate content from request"
+        echo "  test                        Run test generation"
+        exit 0
+        ;;
+esac
