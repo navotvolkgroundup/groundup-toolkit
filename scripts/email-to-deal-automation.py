@@ -112,6 +112,19 @@ def extract_company_info(thread):
     deck_match = re.search(r'(.+?)\s+(deck|pitch|presentation)', subject_clean, re.IGNORECASE)
     company_name = deck_match.group(1).strip() if deck_match else subject_clean or 'Company from Email'
 
+    # Strip common meeting/intro phrases to extract just the company name
+    company_name = re.sub(
+        r'\s*[-–—:]\s*(?:request\s+for\s+a?\s*meeting|meeting\s+request|intro\s+call|'
+        r'introductions?|catch\s*up|follow\s*up|quick\s+chat|schedule\s+a?\s*call|'
+        r'connect|partnership|collaboration|demo\s+request|overview)\s*$',
+        '', company_name, flags=re.IGNORECASE
+    ).strip()
+    company_name = re.sub(
+        r'^(?:request\s+for\s+a?\s*meeting\s+with|meeting\s+with|intro\s+to|'
+        r'introduction\s+to|connect\s+with)\s+',
+        '', company_name, flags=re.IGNORECASE
+    ).strip()
+
     # Final guard: never use our own firm name as a deal
     if _is_own_firm_name(company_name):
         company_name = 'Company from Email'
