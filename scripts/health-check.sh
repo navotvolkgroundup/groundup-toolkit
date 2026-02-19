@@ -23,6 +23,8 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 TIMESTAMP=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 ALERT_EMAIL="${ALERT_EMAIL:-admin@yourcompany.com}"
 GOG_ACCOUNT="${GOG_ACCOUNT:-assistant@yourcompany.com}"
+ALERT_STATE_DIR="/tmp/openclaw-health-alerts"
+mkdir -p "$ALERT_STATE_DIR"
 FAILURES=0
 WARNINGS=0
 
@@ -40,13 +42,37 @@ fail() {
     FAILURES=$((FAILURES+1))
 }
 
+# Send alert only once per incident. Uses a state file per alert key.
+# When the issue resolves, call clear_alert to remove the state and send a recovery email.
 send_alert() {
     local subject="$1"
     local body="$2"
+    local key="${3:-default}"
+    local state_file="$ALERT_STATE_DIR/$key"
+
+    # Skip if already alerted for this incident
+    if [ -f "$state_file" ]; then
+        log "Alert already sent for '$key' — suppressing duplicate"
+        return
+    fi
+
     . ~/.profile 2>/dev/null || true
     export GOG_KEYRING_PASSWORD="${GOG_KEYRING_PASSWORD}"
     gog gmail send --to "$ALERT_EMAIL" --subject "$subject" --body "$body" --account "$GOG_ACCOUNT" 2>/dev/null || true
+    echo "$TIMESTAMP" > "$state_file"
     log "Alert email sent to $ALERT_EMAIL"
+}
+
+clear_alert() {
+    local key="$1"
+    local state_file="$ALERT_STATE_DIR/$key"
+    if [ -f "$state_file" ]; then
+        rm -f "$state_file"
+        . ~/.profile 2>/dev/null || true
+        export GOG_KEYRING_PASSWORD="${GOG_KEYRING_PASSWORD}"
+        gog gmail send --to "$ALERT_EMAIL" --subject "RECOVERED: $key" --body "The $key issue on $(hostname) has recovered at $TIMESTAMP." --account "$GOG_ACCOUNT" 2>/dev/null || true
+        log "Recovery email sent for '$key'"
+    fi
 }
 
 log "====================================="
@@ -67,10 +93,11 @@ if [ "$GW_STATUS" != "active" ]; then
         log "  Gateway restarted successfully"
     else
         fail "Gateway failed to restart!"
-        send_alert "CRITICAL: OpenClaw Gateway Down" "The OpenClaw gateway failed to restart. Manual intervention needed."
+        send_alert "CRITICAL: OpenClaw Gateway Down" "The OpenClaw gateway failed to restart on $(hostname -I | awk '{print $1}'). Manual intervention needed." "gateway-down"
     fi
 else
     log "  Gateway is running"
+    clear_alert "gateway-down"
 fi
 
 # ----------------------------------------
@@ -93,6 +120,7 @@ log "[3/6] WhatsApp connection check..."
 WA_OUTPUT=$(openclaw channels status --probe 2>&1)
 if echo "$WA_OUTPUT" | grep -qi "linked.*running.*connected"; then
     log "  WhatsApp is linked, running, and connected"
+    clear_alert "whatsapp-down"
 elif echo "$WA_OUTPUT" | grep -qi "linked"; then
     warn "WhatsApp linked but may not be fully connected. Restarting gateway..."
     openclaw gateway restart 2>/dev/null
@@ -103,7 +131,7 @@ elif echo "$WA_OUTPUT" | grep -qi "linked"; then
         log "  WhatsApp recovered after restart"
     else
         fail "WhatsApp failed to reconnect after restart!"
-        send_alert "CRITICAL: WhatsApp Disconnected" "WhatsApp is disconnected and failed to recover after gateway restart. Manual intervention needed. Run: openclaw channels login"
+        send_alert "CRITICAL: WhatsApp Disconnected" "WhatsApp is disconnected and failed to recover after gateway restart. Manual intervention needed. Run: openclaw channels login" "whatsapp-down"
     fi
 else
     fail "WhatsApp not linked! Restarting gateway..."
@@ -114,7 +142,7 @@ else
         log "  WhatsApp recovered after restart"
     else
         fail "WhatsApp failed to reconnect!"
-        send_alert "CRITICAL: WhatsApp Disconnected" "WhatsApp is disconnected and failed to recover after gateway restart. Manual intervention needed. Run: openclaw channels login"
+        send_alert "CRITICAL: WhatsApp Disconnected" "WhatsApp is disconnected and failed to recover after gateway restart. Manual intervention needed. Run: openclaw channels login" "whatsapp-down"
     fi
 fi
 
@@ -137,7 +165,7 @@ log "[5/6] Disk & memory check..."
 DISK_PCT=$(df / | awk 'NR>1{print $5}' | sed 's/%//')
 if [ "$DISK_PCT" -ge 90 ]; then
     warn "Disk usage is at ${DISK_PCT}%"
-    send_alert "WARN: Disk usage at ${DISK_PCT}%" "Disk usage is at ${DISK_PCT}%. Consider cleanup."
+    send_alert "WARN: Disk usage at ${DISK_PCT}%" "Disk usage is at ${DISK_PCT}%. Consider cleanup." "disk-high"
 else
     log "  Disk usage: ${DISK_PCT}%"
 fi
