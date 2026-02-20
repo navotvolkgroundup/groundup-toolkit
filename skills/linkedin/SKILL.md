@@ -1,68 +1,86 @@
-# LinkedIn Skill
+---
+name: linkedin
+description: LinkedIn automation via browser for messaging, profile viewing, search, and network actions.
+homepage: https://linkedin.com
+metadata: {"clawdbot":{"emoji":"💼"}}
+---
 
-Get LinkedIn profile information and research people and companies.
+# LinkedIn
 
-## Name
-linkedin
+Use browser automation to interact with LinkedIn - check messages, view profiles, search, and send connection requests.
 
-## Description
-Research LinkedIn profiles, get person details, company information, and insights about people's work history and connections. Use this skill when the user wants to look up someone on LinkedIn, research a company, or get professional background information.
+## Setup
 
-## Actions
-
-### person
-Get detailed LinkedIn profile for a person
-
-**Usage:**
-```
-linkedin person PROFILE_URL
-```
-
-**Example:**
-```
-linkedin person https://www.linkedin.com/in/johndoe/
+### 1. Install the systemd service
+```bash
+cp services/linkedin-browser.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now linkedin-browser.service
 ```
 
-### company
-Get LinkedIn company profile information
-
-**Usage:**
-```
-linkedin company COMPANY_URL
-```
-
-**Example:**
-```
-linkedin company https://www.linkedin.com/company/your-company/
+### 2. Create the OpenClaw browser profile
+```bash
+openclaw browser create-profile --name linkedin --color '#0077B5'
+openclaw config set browser.noSandbox true
+openclaw config set browser.headless true
 ```
 
-## When to Use This Skill
+### 3. Log in to LinkedIn (one-time)
+```bash
+openclaw browser navigate --browser-profile linkedin https://www.linkedin.com
+# Use Google OAuth or email/password to log in via browser tool
+# Session cookies persist in /root/.openclaw/browser-data/linkedin/
+```
 
-This skill should be invoked when the user wants to:
-- Look up someone's LinkedIn profile
-- Research a person's professional background
-- Get company information from LinkedIn
-- Check someone's work history or education
-- Research a potential candidate or partner
-- Get details about a company's employees or structure
+## Common Operations
 
-Natural language triggers:
-- "look up NAME on LinkedIn"
-- "get NAME's LinkedIn profile"
-- "research COMPANY on LinkedIn"
-- "what's PERSON's background"
-- "check out COMPANY LinkedIn"
-- "find information about PERSON/COMPANY"
+### Search People
+```
+browser action=navigate profile=linkedin targetUrl="https://www.linkedin.com/search/results/people/?keywords=QUERY"
+browser action=snapshot profile=linkedin
+```
 
-## Setup Required
+### View Profile
+```
+browser action=navigate profile=linkedin targetUrl="https://www.linkedin.com/in/USERNAME/"
+browser action=snapshot profile=linkedin
+```
 
-Before using this skill, you need to configure LinkedIn authentication:
+### View Company
+```
+browser action=navigate profile=linkedin targetUrl="https://www.linkedin.com/company/COMPANY/"
+browser action=snapshot profile=linkedin
+```
 
-1. Get your LinkedIn cookie from an incognito browser session
-2. Run the setup script with your cookie value
+### Check Connection Status
+```
+browser action=snapshot profile=linkedin targetUrl="https://www.linkedin.com/feed/"
+```
 
-## Examples
+### View Messages
+```
+browser action=navigate profile=linkedin targetUrl="https://www.linkedin.com/messaging/"
+browser action=snapshot profile=linkedin
+```
 
-Get person profile - look up a LinkedIn user
-Get company profile - research a company on LinkedIn
-Natural language - automatically fetch profile from URL
+### Send Message (confirm with user first!)
+1. Navigate to messaging or profile
+2. Use `browser action=act` with click/type actions
+3. Always confirm message content before sending
+
+## Safety Rules
+- **Never send messages without explicit user approval**
+- **Never accept/send connection requests without confirmation**
+- **Avoid rapid automated actions** - LinkedIn is aggressive about detecting automation
+- Rate limit: ~30 actions per hour max recommended
+
+## Tips
+- Use `--efficient` flag on snapshots to get clickable ref labels
+- Use `--format aria` for full accessibility tree (more detail)
+- The browser session survives server restarts (systemd auto-starts Chromium)
+
+## Troubleshooting
+- If logged out: Re-authenticate via Google OAuth in the browser
+- If rate limited: Wait 24 hours, reduce action frequency
+- If CAPTCHA: Complete manually in browser, then resume
+- If browser won't start: Check `systemctl --user status linkedin-browser.service`

@@ -1,30 +1,63 @@
 #!/bin/bash
-# LinkedIn skill wrapper for OpenClaw - uses MCP bridge
+# LinkedIn skill wrapper for OpenClaw - uses browser automation
+# Requires: linkedin-browser.service running, OpenClaw browser profile "linkedin"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BRIDGE_SCRIPT="${SCRIPT_DIR}/linkedin-mcp-bridge.py"
+set -euo pipefail
 
-# Check if action is provided
-if [ -z "$1" ]; then
+PROFILE="linkedin"
+
+usage() {
     echo "Usage: linkedin <action> [args...]"
-    echo "Actions: person, company"
+    echo ""
+    echo "Actions:"
+    echo "  search <query>     Search for people on LinkedIn"
+    echo "  profile <url>      View a LinkedIn profile"
+    echo "  company <url>      View a company page"
+    echo "  messages           Check LinkedIn messages"
+    echo "  status             Check browser session status"
+    echo ""
+    echo "Examples:"
+    echo "  linkedin search \"Sam Altman\""
+    echo "  linkedin profile https://www.linkedin.com/in/johndoe/"
+    echo "  linkedin company https://www.linkedin.com/company/openai/"
     exit 1
-fi
+}
+
+[ -z "${1:-}" ] && usage
 
 ACTION="$1"
 shift
 
-# Route to MCP bridge
 case "$ACTION" in
-    person)
-        $BRIDGE_SCRIPT person "$@"
+    search)
+        QUERY="${*:?Usage: linkedin search <query>}"
+        ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$QUERY'))")
+        openclaw browser navigate --browser-profile "$PROFILE" "https://www.linkedin.com/search/results/people/?keywords=${ENCODED}"
+        sleep 2
+        openclaw browser snapshot --browser-profile "$PROFILE" --efficient
+        ;;
+    profile)
+        URL="${1:?Usage: linkedin profile <url>}"
+        openclaw browser navigate --browser-profile "$PROFILE" "$URL"
+        sleep 2
+        openclaw browser snapshot --browser-profile "$PROFILE" --format aria --limit 300
         ;;
     company)
-        $BRIDGE_SCRIPT company "$@"
+        URL="${1:?Usage: linkedin company <url>}"
+        openclaw browser navigate --browser-profile "$PROFILE" "$URL"
+        sleep 2
+        openclaw browser snapshot --browser-profile "$PROFILE" --format aria --limit 300
+        ;;
+    messages)
+        openclaw browser navigate --browser-profile "$PROFILE" "https://www.linkedin.com/messaging/"
+        sleep 2
+        openclaw browser snapshot --browser-profile "$PROFILE" --efficient
+        ;;
+    status)
+        openclaw browser status --browser-profile "$PROFILE" --json
         ;;
     *)
         echo "Unknown action: $ACTION"
-        echo "Available actions: person, company"
-        exit 1
+        usage
         ;;
 esac
