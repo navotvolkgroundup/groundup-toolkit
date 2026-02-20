@@ -68,7 +68,6 @@ case "$JOB" in
         ;;
     founder-scout)
         export_var ANTHROPIC_API_KEY
-        export_var BRAVE_SEARCH_API_KEY
         export_var GOG_KEYRING_PASSWORD
         export_var GOG_ACCOUNT
         ;;

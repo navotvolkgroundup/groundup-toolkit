@@ -1,13 +1,13 @@
 ---
 name: founder-scout
-description: Proactively discover Israeli tech founders about to start new companies via LinkedIn + web signals.
+description: Proactively discover Israeli tech founders about to start new companies via LinkedIn signals.
 homepage: https://groundup.vc
 metadata: {"clawdbot":{"emoji":"🔍"}}
 ---
 
 # Founder Scout
 
-Automated scouting for Israeli tech founders and operators who are about to start new companies — before they announce or raise. Uses Brave Search + LinkedIn browser automation to detect signals and send alerts.
+Automated scouting for Israeli tech founders and operators who are about to start new companies — before they announce or raise. Uses LinkedIn browser automation exclusively to search for people, analyze profiles, and detect early signals.
 
 ## Target Profile
 - Israeli tech founders, CTOs, VPs who recently left a company
@@ -23,7 +23,7 @@ Automated scouting for Israeli tech founders and operators who are about to star
 ## Commands
 
 ```bash
-# Daily scan — run rotated Brave searches, detect signals
+# Daily scan — run rotated LinkedIn searches, detect signals
 founder-scout scan
 
 # Weekly briefing — compile and email summary
@@ -47,7 +47,6 @@ founder-scout dismiss <id>
 ### 1. Environment
 Requires these keys in `.env`:
 - `ANTHROPIC_API_KEY` — for Claude signal analysis
-- `BRAVE_SEARCH_API_KEY` — for web searches
 - `GOG_KEYRING_PASSWORD` + `GOG_ACCOUNT` — for email sending
 
 ### 2. Cron (automated)
@@ -62,13 +61,12 @@ Requires these keys in `.env`:
 0 14 * * 3,6 load-env.sh founder-scout -- scout.py watchlist-update
 ```
 
-### 3. LinkedIn browser (optional)
-If the LinkedIn browser skill is configured, high-signal candidates get full profile lookups via `openclaw browser`.
+### 3. LinkedIn browser (required)
+The LinkedIn browser skill must be configured and running. The scan will abort if the browser session is unavailable.
 
 ## Email Recipients
 Reports are sent to team members configured in `config.yaml`.
 
 ## Rate Limits
-- Brave Search: 6-8 queries/day (rotated from pool of 10)
-- Claude API: max 10 calls/day (~$0.10/day)
-- LinkedIn browser: max 5 profile lookups/day
+- LinkedIn browser: max 15 profile lookups/scan, ~4s delay between navigations
+- Claude API: max 10 calls/scan (~$0.10/scan)
