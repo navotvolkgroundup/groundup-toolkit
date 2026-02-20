@@ -1,0 +1,57 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$SCRIPT_DIR/scout.py"
+
+# Safe .env loading (no shell execution)
+if [ -f "$HOME/.env" ]; then
+    while IFS='=' read -r key value; do
+        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+        key=$(echo "$key" | xargs)
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] && export "$key=$value"
+    done < "$HOME/.env"
+fi
+
+ACTION="${1:-scan}"
+
+case "$ACTION" in
+    scan)
+        /usr/bin/python3 "$SCRIPT" scan
+        ;;
+
+    briefing)
+        /usr/bin/python3 "$SCRIPT" briefing
+        ;;
+
+    watchlist-update)
+        /usr/bin/python3 "$SCRIPT" watchlist-update
+        ;;
+
+    status)
+        /usr/bin/python3 "$SCRIPT" status
+        ;;
+
+    add)
+        NAME="${2:-}"
+        LINKEDIN_URL="${3:-}"
+        if [ -z "$NAME" ]; then
+            echo "Usage: founder-scout add <name> [linkedin_url]"
+            exit 1
+        fi
+        /usr/bin/python3 "$SCRIPT" add "$NAME" "$LINKEDIN_URL"
+        ;;
+
+    dismiss)
+        PERSON_ID="${2:-}"
+        if [ -z "$PERSON_ID" ]; then
+            echo "Usage: founder-scout dismiss <id>"
+            exit 1
+        fi
+        /usr/bin/python3 "$SCRIPT" dismiss "$PERSON_ID"
+        ;;
+
+    *)
+        echo "Usage: founder-scout [scan|briefing|watchlist-update|status|add <name> [url]|dismiss <id>]"
+        exit 1
+        ;;
+esac
