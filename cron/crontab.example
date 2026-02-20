@@ -1,37 +1,44 @@
 # GroundUp Toolkit - Cron Jobs
-# Edit TOOLKIT_DIR below to match your installation directory
-# Install with: crontab -e  (then paste this content)
+#
+# Set TOOLKIT_ROOT to your installation directory before installing:
+#   export TOOLKIT_ROOT=/path/to/groundup-toolkit
+#   envsubst < cron/crontab.example | crontab -
+#
+# Or edit TOOLKIT_ROOT below manually, then:
+#   crontab cron/crontab.example
 
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-TOOLKIT_DIR=/path/to/groundup-toolkit
+TOOLKIT_ROOT=/path/to/groundup-toolkit
 
 # Uses load-env.sh to export only the secrets each job needs,
 # instead of sourcing the entire .env into every process.
 # See scripts/load-env.sh for the per-job variable mappings.
+# Note: if env vars are already injected (e.g. container environment),
+# load-env.sh will skip .env and use the existing environment.
 
 # Meeting reminders - every 5 minutes
 # Sends WhatsApp reminders 10-15 min before meetings
-*/5 * * * * $TOOLKIT_DIR/scripts/load-env.sh meeting-reminders -- $TOOLKIT_DIR/skills/meeting-reminders/meeting-reminders reminders >> /var/log/meeting-reminders.log 2>&1
+*/5 * * * * $TOOLKIT_ROOT/scripts/load-env.sh meeting-reminders -- $TOOLKIT_ROOT/skills/meeting-reminders/meeting-reminders reminders >> /var/log/meeting-reminders.log 2>&1
 
 # Meeting bot - process recordings every 2 hours
-0 */2 * * * $TOOLKIT_DIR/scripts/load-env.sh meeting-bot -- $TOOLKIT_DIR/skills/meeting-bot/meeting-bot >> /var/log/meeting-bot.log 2>&1
+0 */2 * * * $TOOLKIT_ROOT/scripts/load-env.sh meeting-bot -- $TOOLKIT_ROOT/skills/meeting-bot/meeting-bot >> /var/log/meeting-bot.log 2>&1
 
 # Meeting auto-join - every 3 minutes
-*/3 * * * * $TOOLKIT_DIR/scripts/load-env.sh meeting-bot -- $TOOLKIT_DIR/skills/meeting-bot/meeting-auto-join >> /var/log/meeting-auto-join.log 2>&1
+*/3 * * * * $TOOLKIT_ROOT/scripts/load-env.sh meeting-bot -- $TOOLKIT_ROOT/skills/meeting-bot/meeting-auto-join >> /var/log/meeting-auto-join.log 2>&1
 
 # Email-to-deal automation - every 10 minutes
 # Scans inbox for pitch decks / deal emails and creates HubSpot deals
-*/10 * * * * $TOOLKIT_DIR/scripts/load-env.sh email-to-deal -- $TOOLKIT_DIR/.venv/bin/python3 $TOOLKIT_DIR/scripts/email-to-deal-automation.py >> /var/log/email-to-deal.log 2>&1
+*/10 * * * * $TOOLKIT_ROOT/scripts/load-env.sh email-to-deal -- $TOOLKIT_ROOT/.venv/bin/python3 $TOOLKIT_ROOT/scripts/email-to-deal-automation.py >> /var/log/email-to-deal.log 2>&1
 
 # Health check - every 15 minutes
-*/15 * * * * $TOOLKIT_DIR/scripts/health-check.sh >> /var/log/toolkit-health.log 2>&1
+*/15 * * * * $TOOLKIT_ROOT/scripts/health-check.sh >> /var/log/toolkit-health.log 2>&1
 
 # WhatsApp watchdog - every 5 minutes
-*/5 * * * * $TOOLKIT_DIR/scripts/load-env.sh watchdog -- $TOOLKIT_DIR/scripts/whatsapp-watchdog.sh >> /var/log/whatsapp-watchdog.log 2>&1
+*/5 * * * * $TOOLKIT_ROOT/scripts/load-env.sh watchdog -- $TOOLKIT_ROOT/scripts/whatsapp-watchdog.sh >> /var/log/whatsapp-watchdog.log 2>&1
 
 # Scheduled tasks (Shabbat-aware) - every 2 hours
-0 */2 * * * $TOOLKIT_DIR/scripts/run-scheduled.sh >> /var/log/scheduled.log 2>&1
+0 */2 * * * $TOOLKIT_ROOT/scripts/run-scheduled.sh >> /var/log/scheduled.log 2>&1
 
 # NOTE: Log files are written to /var/log/. Make sure the cron user has
-# write access, or change paths to e.g. $TOOLKIT_DIR/logs/
+# write access, or change paths to e.g. $TOOLKIT_ROOT/logs/
