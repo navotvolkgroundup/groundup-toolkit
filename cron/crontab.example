@@ -40,5 +40,14 @@ TOOLKIT_ROOT=/path/to/groundup-toolkit
 # Scheduled tasks (Shabbat-aware) - every 2 hours
 0 */2 * * * $TOOLKIT_ROOT/scripts/run-scheduled.sh >> /var/log/scheduled.log 2>&1
 
+# Founder Scout - daily scan at 7:00 AM
+0 7 * * * $TOOLKIT_ROOT/scripts/load-env.sh founder-scout -- $TOOLKIT_ROOT/.venv/bin/python3 $TOOLKIT_ROOT/skills/founder-scout/scout.py scan >> /var/log/founder-scout.log 2>&1
+
+# Founder Scout - weekly briefing on Sunday at 8:00 AM
+0 8 * * 0 $TOOLKIT_ROOT/scripts/load-env.sh founder-scout -- $TOOLKIT_ROOT/.venv/bin/python3 $TOOLKIT_ROOT/skills/founder-scout/scout.py briefing >> /var/log/founder-scout.log 2>&1
+
+# Founder Scout - watchlist re-scan on Wed/Sat at 14:00
+0 14 * * 3,6 $TOOLKIT_ROOT/scripts/load-env.sh founder-scout -- $TOOLKIT_ROOT/.venv/bin/python3 $TOOLKIT_ROOT/skills/founder-scout/scout.py watchlist-update >> /var/log/founder-scout.log 2>&1
+
 # NOTE: Log files are written to /var/log/. Make sure the cron user has
 # write access, or change paths to e.g. $TOOLKIT_ROOT/logs/

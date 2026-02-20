@@ -66,6 +66,12 @@ case "$JOB" in
         export_var MATON_API_KEY
         export_var ANTHROPIC_API_KEY
         ;;
+    founder-scout)
+        export_var ANTHROPIC_API_KEY
+        export_var BRAVE_SEARCH_API_KEY
+        export_var GOG_KEYRING_PASSWORD
+        export_var GOG_ACCOUNT
+        ;;
     watchdog)
         export_var ASSISTANT_WHATSAPP_PHONE
         export_var ALERT_PHONE
