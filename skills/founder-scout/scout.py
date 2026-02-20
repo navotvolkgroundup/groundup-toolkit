@@ -865,7 +865,7 @@ def run_daily_scan():
         analysis = analyze_with_claude(name, relevant_results, MAX_CLAUDE_CALLS_PER_SCAN - claude_calls)
         claude_calls += 1
 
-        if analysis and analysis.get('confidence') not in ('none', None) and analysis.get('signals'):
+        if analysis and analysis.get('confidence') in ('high', 'medium') and analysis.get('signals'):
             confidence = analysis['confidence']
             summary = analysis.get('summary', '')
             li_hint = analysis.get('linkedin_hint') or linkedin_url
@@ -1045,7 +1045,7 @@ Return ONLY valid JSON:
                 match = re.search(r'\{.*\}', response, re.DOTALL)
                 if match:
                     analysis = json.loads(match.group())
-                    if analysis.get('confidence') not in ('none', None) and analysis.get('signals'):
+                    if analysis.get('confidence') in ('high', 'medium') and analysis.get('signals'):
                         new_summary = analysis.get('summary', '')
                         if new_summary != person.get('last_signal'):
                             db.record_signal(person['id'], 'watchlist_update', analysis['confidence'],
