@@ -40,6 +40,8 @@ from lib.config import config
 ANTHROPIC_API_KEY = config.anthropic_api_key
 BRAVE_SEARCH_API_KEY = config.brave_search_api_key
 GOG_ACCOUNT = config.assistant_email
+LINKEDIN_BROWSER_PROFILE = "linkedin"
+MAX_LINKEDIN_LOOKUPS_PER_SCAN = 5
 
 # Data directory
 _TOOLKIT_ROOT = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -516,6 +518,122 @@ def find_linkedin_url(name, results):
     return None
 
 
+# --- LinkedIn Browser Integration ---
+
+def linkedin_browser_available():
+    """Check if the LinkedIn browser session is available."""
+    try:
+        result = subprocess.run(
+            ['openclaw', 'browser', 'status', '--browser-profile', LINKEDIN_BROWSER_PROFILE, '--json'],
+            capture_output=True, text=True, timeout=10
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def linkedin_search(query):
+    """Search LinkedIn for a person using the browser skill. Returns snapshot text."""
+    try:
+        encoded = subprocess.run(
+            ['python3', '-c', f"import urllib.parse; print(urllib.parse.quote({query!r}))"],
+            capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+
+        url = f"https://www.linkedin.com/search/results/people/?keywords={encoded}"
+        subprocess.run(
+            ['openclaw', 'browser', 'navigate', '--browser-profile', LINKEDIN_BROWSER_PROFILE, url],
+            capture_output=True, text=True, timeout=15
+        )
+        time.sleep(3)
+
+        result = subprocess.run(
+            ['openclaw', 'browser', 'snapshot', '--browser-profile', LINKEDIN_BROWSER_PROFILE, '--efficient'],
+            capture_output=True, text=True, timeout=15
+        )
+        return result.stdout if result.returncode == 0 else None
+    except Exception as e:
+        print(f"  LinkedIn search error: {e}", file=sys.stderr)
+        return None
+
+
+def linkedin_profile_lookup(url):
+    """Look up a LinkedIn profile using the browser skill. Returns snapshot text."""
+    try:
+        subprocess.run(
+            ['openclaw', 'browser', 'navigate', '--browser-profile', LINKEDIN_BROWSER_PROFILE, url],
+            capture_output=True, text=True, timeout=15
+        )
+        time.sleep(3)
+
+        result = subprocess.run(
+            ['openclaw', 'browser', 'snapshot', '--browser-profile', LINKEDIN_BROWSER_PROFILE,
+             '--format', 'aria', '--limit', '300'],
+            capture_output=True, text=True, timeout=15
+        )
+        return result.stdout if result.returncode == 0 else None
+    except Exception as e:
+        print(f"  LinkedIn profile lookup error: {e}", file=sys.stderr)
+        return None
+
+
+def enrich_with_linkedin(name, linkedin_url, claude_calls_remaining):
+    """Use LinkedIn browser to get richer profile data, then have Claude extract signals.
+
+    Returns enriched analysis dict or None.
+    """
+    profile_text = None
+
+    if linkedin_url:
+        print(f"      LinkedIn: looking up profile {linkedin_url[:50]}...")
+        profile_text = linkedin_profile_lookup(linkedin_url)
+    else:
+        # Try to find them via LinkedIn search
+        print(f"      LinkedIn: searching for {name}...")
+        search_text = linkedin_search(name)
+        if search_text:
+            # Try to extract a profile URL from the search results
+            li_match = re.search(r'(https://www\.linkedin\.com/in/[a-zA-Z0-9_-]+)', search_text)
+            if li_match:
+                linkedin_url = li_match.group(1)
+                print(f"      LinkedIn: found profile {linkedin_url}")
+                profile_text = linkedin_profile_lookup(linkedin_url)
+
+    if not profile_text or claude_calls_remaining <= 0:
+        return None
+
+    # Have Claude analyze the LinkedIn profile for signals
+    system_prompt = (
+        "You are a VC scout analyzing a LinkedIn profile for signs that this person is about to start "
+        "a new company. Look for: recent role changes, 'open to work', stealth references, gaps in "
+        "employment, pivot from corporate to startup, advisory roles at multiple startups."
+    )
+    prompt = f"""Analyze this LinkedIn profile for "about to start a company" signals.
+
+NAME: {name}
+LINKEDIN URL: {linkedin_url or 'unknown'}
+
+PROFILE DATA:
+{profile_text[:3000]}
+
+Return ONLY valid JSON (no markdown):
+{{"signals": ["signal1", "signal2"], "confidence": "high|medium|low|none", "summary": "One sentence", "current_title": "their current role or null", "linkedin_url": "{linkedin_url or ''}"}}"""
+
+    response = call_claude(prompt, system_prompt, max_tokens=512)
+    if not response:
+        return None
+
+    try:
+        match = re.search(r'\{.*\}', response, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group())
+            parsed['linkedin_url'] = linkedin_url
+            return parsed
+    except (json.JSONDecodeError, AttributeError):
+        print(f"  Could not parse LinkedIn analysis for {name}", file=sys.stderr)
+    return None
+
+
 # --- Sending ---
 
 def send_email(to_email, subject, body):
@@ -666,6 +784,14 @@ def run_daily_scan():
     year = datetime.now().year
     prev_year = year - 1
 
+    # Check LinkedIn browser availability
+    li_available = linkedin_browser_available()
+    li_lookups = 0
+    if li_available:
+        print("  LinkedIn browser: available")
+    else:
+        print("  LinkedIn browser: not available (will skip profile lookups)")
+
     # Get queries due to run
     queue = db.get_rotation_queue(MAX_QUERIES_PER_SCAN)
     if not queue:
@@ -744,6 +870,26 @@ def run_daily_scan():
             summary = analysis.get('summary', '')
             li_hint = analysis.get('linkedin_hint') or linkedin_url
 
+            # LinkedIn enrichment for high/medium candidates
+            if li_available and li_lookups < MAX_LINKEDIN_LOOKUPS_PER_SCAN and confidence in ('high', 'medium'):
+                li_lookups += 1
+                time.sleep(13)  # Rate limit before Claude call
+                li_analysis = enrich_with_linkedin(name, li_hint, MAX_CLAUDE_CALLS_PER_SCAN - claude_calls)
+                if li_analysis:
+                    claude_calls += 1
+                    # Upgrade confidence if LinkedIn confirms signals
+                    li_confidence = li_analysis.get('confidence', 'none')
+                    if li_confidence == 'high' and confidence != 'high':
+                        confidence = 'high'
+                    if li_analysis.get('linkedin_url'):
+                        li_hint = li_analysis['linkedin_url']
+                    li_summary = li_analysis.get('summary', '')
+                    if li_summary:
+                        summary = f"{summary} | LinkedIn: {li_summary}"
+                    current_title = li_analysis.get('current_title')
+                    if current_title:
+                        summary = f"[{current_title}] {summary}"
+
             person_id = db.add_person(name, li_hint, 'search')
             if person_id:
                 db.record_signal(person_id, 'claude_analysis', confidence, summary,
@@ -815,7 +961,7 @@ def run_weekly_briefing():
 
 
 def run_watchlist_update():
-    """Re-scan existing tracked people for new signals."""
+    """Re-scan existing tracked people for new signals using Brave + LinkedIn."""
     print(f"[{datetime.now()}] Running Founder Scout watchlist update...")
 
     db = ScoutDatabase(DB_PATH)
@@ -826,6 +972,14 @@ def run_watchlist_update():
         db.log_scan('watchlist_update')
         return
 
+    # Check LinkedIn browser availability
+    li_available = linkedin_browser_available()
+    li_lookups = 0
+    if li_available:
+        print(f"  LinkedIn browser: available (max {MAX_LINKEDIN_LOOKUPS_PER_SCAN} lookups)")
+    else:
+        print("  LinkedIn browser: not available")
+
     print(f"  Re-scanning {len(people)} active people...")
     year = datetime.now().year
     claude_calls = 0
@@ -833,33 +987,73 @@ def run_watchlist_update():
 
     for person in people:
         name = person['name']
+        linkedin_url = person.get('linkedin_url')
         print(f"    Checking {name}...")
 
-        # Search for recent news about this person
+        # Brave search for recent news
         results = brave_search(f'"{name}" Israel startup founder {year}', count=5)
         time.sleep(0.5)
 
-        if not results:
-            continue
-
         if claude_calls >= MAX_CLAUDE_CALLS_PER_SCAN:
             break
+
+        # LinkedIn profile check for people who have a URL
+        li_profile_text = None
+        if li_available and linkedin_url and li_lookups < MAX_LINKEDIN_LOOKUPS_PER_SCAN:
+            li_lookups += 1
+            print(f"      LinkedIn: checking profile...")
+            li_profile_text = linkedin_profile_lookup(linkedin_url)
+            time.sleep(2)
+
+        if not results and not li_profile_text:
+            continue
 
         # Rate limit: wait between Claude calls
         if claude_calls > 0:
             time.sleep(13)
 
-        analysis = analyze_with_claude(name, results, MAX_CLAUDE_CALLS_PER_SCAN - claude_calls)
+        # Build combined context for Claude
+        snippets_text = '\n'.join([
+            f"- {r.get('title', '')}: {r.get('description', '')}"
+            for r in (results or [])[:8]
+        ])
+        li_context = ""
+        if li_profile_text:
+            li_context = f"\n\nLINKEDIN PROFILE:\n{li_profile_text[:2000]}"
+
+        system_prompt = (
+            "You are a VC scout checking for new signals about a person already on our watchlist. "
+            "Look for changes since last check: new role, stealth hints, fundraising, advisory roles."
+        )
+        prompt = f"""Check for NEW signals about this person (they're already on our watchlist).
+
+NAME: {name}
+LINKEDIN: {linkedin_url or 'unknown'}
+LAST KNOWN SIGNAL: {person.get('last_signal', 'None')}
+
+RECENT WEB RESULTS:
+{snippets_text or 'No web results found.'}{li_context}
+
+Return ONLY valid JSON:
+{{"signals": ["signal1"], "confidence": "high|medium|low|none", "summary": "What's new since last check"}}"""
+
+        response = call_claude(prompt, system_prompt, max_tokens=512)
         claude_calls += 1
 
-        if analysis and analysis.get('confidence') not in ('none', None) and analysis.get('signals'):
-            new_summary = analysis.get('summary', '')
-            # Only record if it's different from last signal
-            if new_summary != person.get('last_signal'):
-                db.record_signal(person['id'], 'watchlist_update', analysis['confidence'],
-                                 new_summary, analysis.get('linkedin_hint'))
-                new_signals += 1
-                print(f"      New signal: {new_summary[:60]}")
+        if response:
+            try:
+                match = re.search(r'\{.*\}', response, re.DOTALL)
+                if match:
+                    analysis = json.loads(match.group())
+                    if analysis.get('confidence') not in ('none', None) and analysis.get('signals'):
+                        new_summary = analysis.get('summary', '')
+                        if new_summary != person.get('last_signal'):
+                            db.record_signal(person['id'], 'watchlist_update', analysis['confidence'],
+                                             new_summary, linkedin_url)
+                            new_signals += 1
+                            print(f"      New signal: {new_summary[:60]}")
+            except (json.JSONDecodeError, AttributeError):
+                pass
 
         # Update last_scanned
         conn = sqlite3.connect(db.db_path)
@@ -869,7 +1063,8 @@ def run_watchlist_update():
         conn.close()
 
     db.log_scan('watchlist_update', queries_run=len(people), signals_detected=new_signals)
-    print(f"  Watchlist update complete: {len(people)} checked, {new_signals} new signals, {claude_calls} Claude calls")
+    print(f"  Watchlist update complete: {len(people)} checked, {new_signals} new signals, "
+          f"{claude_calls} Claude calls, {li_lookups} LinkedIn lookups")
 
 
 def run_status():
