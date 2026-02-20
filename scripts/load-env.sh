@@ -12,8 +12,11 @@ TOOLKIT_DIR="${TOOLKIT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 ENV_FILE="${TOOLKIT_DIR}/.env"
 
 if [ ! -f "$ENV_FILE" ]; then
-    echo "Error: .env not found at $ENV_FILE" >&2
-    exit 1
+    # No .env file — assume env vars are already injected (e.g. container environment).
+    # Skip silently and run the command with whatever is already in the environment.
+    shift  # skip job name
+    [[ "${1:-}" == "--" ]] && shift
+    exec "$@"
 fi
 
 # Read .env into an associative array (without exporting everything)

@@ -49,18 +49,37 @@ def _load_env():
 
 
 def _load_yaml():
-    """Load config.yaml from toolkit root."""
+    """Load config from config.yaml, a custom path, or GROUNDUP_CONFIG_JSON env var.
+
+    Resolution order:
+      1. TOOLKIT_CONFIG env var (path to a yaml file)
+      2. config.yaml in TOOLKIT_ROOT
+      3. GROUNDUP_CONFIG_JSON env var (full config as a JSON string)
+         — useful for container/cloud deployments where mounting a file is inconvenient
+
+    Example for container deployments:
+      GROUNDUP_CONFIG_JSON='{"assistant":{"name":"Aria","email":"aria@company.com"},"team":{"domain":"company.com","members":[...]}}'
+    """
     config_path = os.environ.get(
         'TOOLKIT_CONFIG',
         os.path.join(_TOOLKIT_ROOT, 'config.yaml')
     )
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(
-            f"Config file not found at {config_path}. "
-            f"Copy config.example.yaml to config.yaml and fill in your values."
-        )
-    with open(config_path) as f:
-        return yaml.safe_load(f)
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            return yaml.safe_load(f)
+
+    config_json = os.environ.get('GROUNDUP_CONFIG_JSON')
+    if config_json:
+        import json
+        return json.loads(config_json)
+
+    raise FileNotFoundError(
+        f"Config not found. Options:\n"
+        f"  1. Copy config.example.yaml to {config_path} and fill in your values.\n"
+        f"  2. Set TOOLKIT_CONFIG to the path of your config yaml.\n"
+        f"  3. Set GROUNDUP_CONFIG_JSON to the full config as a JSON string "
+        f"(useful for container/cloud deployments)."
+    )
 
 
 class ToolkitConfig:
