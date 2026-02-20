@@ -77,8 +77,8 @@ SEARCH_QUERIES = {
         'query': 'Israel CTO building something new',
         'priority': 'high',
     },
-    'li_open_opportunities': {
-        'query': 'Israel founder open to opportunities',
+    'li_exited_startup': {
+        'query': 'Israel founder exited startup',
         'priority': 'high',
     },
     'li_ceo_next_chapter': {
@@ -427,8 +427,10 @@ def extract_profiles_from_search(search_snapshot):
         name_match = re.match(r'- link "([^"]+)" \[ref=', line)
         if name_match:
             name = name_match.group(1)
-            # Skip navigation links, "View X's profile" links
-            if name.startswith('View ') or name in ('LinkedIn', 'Home', 'My Network', 'Jobs', 'Messaging', 'Notifications'):
+            # Skip navigation links, "View X's profile" links, and junk entries
+            if (name.startswith('View ') or name.startswith('Provides ')
+                    or len(name) > 50
+                    or name in ('LinkedIn', 'Home', 'My Network', 'Jobs', 'Messaging', 'Notifications')):
                 i += 1
                 continue
 
