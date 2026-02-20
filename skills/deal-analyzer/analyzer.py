@@ -432,7 +432,15 @@ def build_research_queries(deck_data):
         queries['company_news'] = f"{company} startup funding news 2025 2026"
 
     if founders:
-        queries['founder_bg'] = f"{founders[0]} founder CEO startup background"
+        # Search all founders (up to 3) with targeted queries
+        for i, founder in enumerate(founders[:3]):
+            suffix = f"_{i+1}" if i > 0 else ""
+            queries[f'founder_linkedin{suffix}'] = f"{founder} site:linkedin.com/in"
+            queries[f'founder_experience{suffix}'] = f"{founder} previous companies startups exits"
+        queries['founder_education'] = f"{founders[0]} education university degree"
+
+    if company:
+        queries['company_linkedin'] = f"{company} site:linkedin.com/company"
 
     if industry:
         queries['comparable_exits'] = f"{industry} startup acquisitions exits M&A 2024 2025"
@@ -518,7 +526,7 @@ Questions for founders: (2-3 specific questions)""",
     {
         'id': 'competitive_landscape',
         'title': '2. Competitive Landscape Analysis',
-        'relevant_research': ['competitors', 'company_news'],
+        'relevant_research': ['competitors', 'company_news', 'company_linkedin'],
         'max_tokens': 1500,
         'prompt': """Analyze the competitive landscape for {company_name}.
 
@@ -547,7 +555,7 @@ Questions for founders: (2-3 specific questions)""",
     {
         'id': 'founder_background',
         'title': '3. Founder Background Check',
-        'relevant_research': ['founder_bg', 'company_news'],
+        'relevant_research': ['founder_linkedin', 'founder_experience', 'founder_education', 'founder_linkedin_2', 'founder_experience_2', 'founder_linkedin_3', 'founder_experience_3', 'company_news'],
         'max_tokens': 1500,
         'prompt': """Evaluate the founding team of {company_name}.
 
