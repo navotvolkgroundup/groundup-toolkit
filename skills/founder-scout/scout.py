@@ -572,8 +572,69 @@ def send_whatsapp(phone, message, max_retries=3, retry_delay=3):
 
 # --- Formatting ---
 
-def format_briefing_email(recipient_name, high_signals, medium_signals, low_signals, stats):
-    """Format weekly briefing email."""
+def format_scan_email(recipient_name, results_by_query):
+    """Format daily scan email with all profiles found per query."""
+    now = datetime.now()
+    date_str = now.strftime('%b %d, %Y')
+
+    lines = [
+        f"Hi {recipient_name},",
+        "",
+        f"Today's LinkedIn scout results ({date_str}):",
+        "",
+    ]
+
+    total_profiles = 0
+    for query_key, query_text, profiles in results_by_query:
+        if not profiles:
+            continue
+        total_profiles += len(profiles)
+        lines.append(f"[{query_text}]")
+        lines.append("-" * 40)
+        for i, p in enumerate(profiles, 1):
+            headline = p.get('headline') or ''
+            lines.append(f"{i}. {p['name']}")
+            if headline:
+                lines.append(f"   {headline}")
+            lines.append(f"   {p['linkedin_url']}")
+            lines.append("")
+
+    if total_profiles == 0:
+        lines.append("No results from today's searches.")
+        lines.append("")
+
+    lines.extend([
+        f"Total: {total_profiles} people from {len(results_by_query)} searches",
+        "",
+        f"-- {config.assistant_name}",
+    ])
+
+    return '\n'.join(lines)
+
+
+def format_scan_whatsapp(recipient_name, results_by_query):
+    """Format compact WhatsApp daily scan summary."""
+    total = sum(len(profiles) for _, _, profiles in results_by_query)
+    queries = len(results_by_query)
+
+    lines = [
+        "Founder Scout Daily",
+        "",
+        f"Hi {recipient_name}, today's scan found {total} people across {queries} searches.",
+        "",
+    ]
+
+    for query_key, query_text, profiles in results_by_query:
+        if not profiles:
+            continue
+        lines.append(f"{query_text}: {len(profiles)} results")
+
+    lines.extend(["", "Full list sent to your email."])
+    return '\n'.join(lines)
+
+
+def format_briefing_email(recipient_name, high_signals, medium_signals, stats):
+    """Format weekly briefing email for watchlist signals."""
     now = datetime.now()
     week_start = (now - timedelta(days=7)).strftime('%b %d')
     week_end = now.strftime('%b %d, %Y')
@@ -581,7 +642,7 @@ def format_briefing_email(recipient_name, high_signals, medium_signals, low_sign
     lines = [
         f"Hi {recipient_name},",
         "",
-        f"Here's your Founder Scout weekly briefing ({week_start} - {week_end}).",
+        f"Founder Scout weekly watchlist update ({week_start} - {week_end}).",
         "",
     ]
 
@@ -594,9 +655,6 @@ def format_briefing_email(recipient_name, high_signals, medium_signals, low_sign
                 lines.append(f"   LinkedIn: {s['linkedin_url']}")
             lines.append(f"   Signal: {s.get('description', 'N/A')}")
             lines.append("")
-    else:
-        lines.append("No high-signal founders detected this week.")
-        lines.append("")
 
     if medium_signals:
         lines.append("MEDIUM SIGNAL")
@@ -608,12 +666,11 @@ def format_briefing_email(recipient_name, high_signals, medium_signals, low_sign
             lines.append(f"   Signal: {s.get('description', 'N/A')}")
             lines.append("")
 
-    if low_signals:
-        lines.append(f"LOW SIGNAL: {len(low_signals)} additional candidate(s) detected.")
+    if not high_signals and not medium_signals:
+        lines.append("No new signals on watchlist this week.")
         lines.append("")
 
     lines.extend([
-        f"Stats: {stats.get('queries', 0)} LinkedIn searches, {stats.get('candidates', 0)} candidates screened, {stats.get('flagged', 0)} flagged",
         f"Watchlist: {stats.get('active', 0)} active people tracked",
         "",
         f"-- {config.assistant_name}",
@@ -622,39 +679,10 @@ def format_briefing_email(recipient_name, high_signals, medium_signals, low_sign
     return '\n'.join(lines)
 
 
-def format_whatsapp_alert(name, signal_description, linkedin_url=None):
-    """Format instant WhatsApp alert for high-signal founders."""
-    lines = [
-        "Founder Scout Alert",
-        "",
-        f"{name}",
-        f"Signal: {signal_description}",
-    ]
-    if linkedin_url:
-        lines.append(f"LinkedIn: {linkedin_url}")
-    return '\n'.join(lines)
-
-
-def format_whatsapp_briefing(recipient_name, high_count, medium_count, low_count, total_active):
-    """Format compact WhatsApp weekly summary."""
-    lines = [
-        "Founder Scout Weekly",
-        "",
-        f"Hi {recipient_name}, this week's scouting results:",
-        f"  High signal: {high_count}",
-        f"  Medium signal: {medium_count}",
-        f"  Low signal: {low_count}",
-        f"  Active watchlist: {total_active}",
-        "",
-        "Full details sent to your email.",
-    ]
-    return '\n'.join(lines)
-
-
 # --- Main Actions ---
 
 def run_daily_scan():
-    """Run daily LinkedIn search rotation and detect signals."""
+    """Run daily LinkedIn search rotation and send results to team."""
     print(f"[{datetime.now()}] Starting Founder Scout daily scan (LinkedIn-only)...")
 
     db = ScoutDatabase(DB_PATH)
@@ -676,119 +704,61 @@ def run_daily_scan():
 
     print(f"  Running {len(queue)} LinkedIn searches...")
 
-    claude_calls = 0
-    profile_lookups = 0
-    people_found = 0
-    signals_detected = 0
-    high_alerts = []
+    results_by_query = []
+    seen_urls = set()  # Deduplicate across queries
+    total_profiles = 0
 
     for query_key in queue:
-        if claude_calls >= MAX_CLAUDE_CALLS_PER_SCAN:
-            print(f"  Claude call limit reached ({MAX_CLAUDE_CALLS_PER_SCAN}), stopping.")
-            break
-        if profile_lookups >= MAX_LINKEDIN_LOOKUPS_PER_SCAN:
-            print(f"  LinkedIn lookup limit reached ({MAX_LINKEDIN_LOOKUPS_PER_SCAN}), stopping.")
-            break
-
         info = SEARCH_QUERIES[query_key]
         query = info['query']
         print(f"    [{query_key}] Searching LinkedIn: {query}...")
 
-        # Step 1: LinkedIn people search
         search_snapshot = linkedin_search(query)
         db.update_rotation(query_key)
+        time.sleep(LINKEDIN_NAV_DELAY)
 
         if not search_snapshot:
             print(f"      No search results returned.")
+            results_by_query.append((query_key, query, []))
             continue
 
-        # Step 2: Extract profile URLs and names from snapshot (regex, no Claude needed)
-        profiles = extract_profiles_from_search(search_snapshot)
+        all_profiles = extract_profiles_from_search(search_snapshot)
+        # Deduplicate: skip profiles already seen in earlier queries
+        new_profiles = []
+        for p in all_profiles:
+            if p['linkedin_url'] not in seen_urls:
+                seen_urls.add(p['linkedin_url'])
+                new_profiles.append(p)
 
-        if not profiles:
-            print(f"      No profiles extracted from search.")
-            continue
+        results_by_query.append((query_key, query, new_profiles))
+        total_profiles += len(new_profiles)
+        skipped = len(all_profiles) - len(new_profiles)
+        msg = f"      Found {len(new_profiles)} profiles"
+        if skipped:
+            msg += f" ({skipped} duplicates removed)"
+        print(msg)
 
-        print(f"      Found {len(profiles)} profiles, analyzing top {MAX_PROFILES_PER_SEARCH}...")
+    # Send results to team
+    if total_profiles > 0:
+        date_str = datetime.now().strftime('%b %d, %Y')
+        subject = f"Founder Scout — {date_str}"
 
-        # Step 3: For each extracted profile, do a full profile lookup + analysis
-        for profile in profiles[:MAX_PROFILES_PER_SEARCH]:
-            if claude_calls >= MAX_CLAUDE_CALLS_PER_SCAN:
-                break
-            if profile_lookups >= MAX_LINKEDIN_LOOKUPS_PER_SCAN:
-                break
+        print(f"\n  Sending results ({total_profiles} people) to team...")
+        for recipient in SCOUT_RECIPIENTS:
+            email_body = format_scan_email(recipient['first_name'], results_by_query)
+            send_email(recipient['email'], subject, email_body)
 
-            name = profile['name']
-            linkedin_url = profile['linkedin_url']
+            wa_message = format_scan_whatsapp(recipient['first_name'], results_by_query)
+            send_whatsapp(recipient['phone'], wa_message)
+    else:
+        print("\n  No profiles found today, skipping email.")
 
-            # Skip if already tracked
-            existing = db.get_person_by_name(name)
-            if existing:
-                continue
-            existing_by_url = db.get_person_by_linkedin(linkedin_url)
-            if existing_by_url:
-                continue
-
-            # Full profile lookup
-            print(f"      [{name}] Fetching profile...")
-            time.sleep(LINKEDIN_NAV_DELAY)
-            profile_text = linkedin_profile_lookup(linkedin_url)
-            profile_lookups += 1
-
-            if not profile_text:
-                print(f"      [{name}] Profile lookup failed, skipping.")
-                continue
-
-            # Claude analyzes profile
-            time.sleep(13)
-            analysis = analyze_linkedin_profile(
-                name, profile_text, linkedin_url,
-                MAX_CLAUDE_CALLS_PER_SCAN - claude_calls
-            )
-            claude_calls += 1
-
-            if not analysis:
-                continue
-
-            confidence = analysis.get('confidence', 'none')
-            if confidence in ('high', 'medium') and analysis.get('signals'):
-                summary = analysis.get('summary', '')
-                current_title = analysis.get('current_title')
-                if current_title:
-                    summary = f"[{current_title}] {summary}"
-
-                person_id = db.add_person(name, linkedin_url, 'linkedin_search')
-                if person_id:
-                    db.record_signal(
-                        person_id, 'linkedin_analysis', confidence, summary, linkedin_url
-                    )
-                    people_found += 1
-                    signals_detected += 1
-                    print(f"      [{confidence.upper()}] {name}: {summary[:70]}")
-
-                    if confidence == 'high':
-                        high_alerts.append({
-                            'name': name,
-                            'description': summary,
-                            'linkedin_url': linkedin_url,
-                        })
-
-    # Send WhatsApp alerts for high-signal founders
-    if high_alerts:
-        print(f"\n  Sending {len(high_alerts)} high-signal alert(s)...")
-        for alert in high_alerts:
-            wa_message = format_whatsapp_alert(alert['name'], alert['description'], alert.get('linkedin_url'))
-            for recipient in SCOUT_RECIPIENTS:
-                send_whatsapp(recipient['phone'], wa_message)
-
-    db.log_scan('daily_search', queries_run=len(queue), people_found=people_found, signals_detected=signals_detected)
-    print(f"\n  Scan complete: {len(queue)} searches, {people_found} new people, "
-          f"{signals_detected} signals, {claude_calls} Claude calls, "
-          f"{profile_lookups} LinkedIn lookups")
+    db.log_scan('daily_search', queries_run=len(queue), people_found=total_profiles)
+    print(f"\n  Scan complete: {len(queue)} searches, {total_profiles} profiles found")
 
 
 def run_weekly_briefing():
-    """Compile and send weekly briefing email + WhatsApp summary."""
+    """Send weekly watchlist update — signals from tracked people."""
     print(f"[{datetime.now()}] Sending Founder Scout weekly briefing...")
 
     db = ScoutDatabase(DB_PATH)
@@ -797,37 +767,22 @@ def run_weekly_briefing():
 
     high_signals = [s for s in recent_signals if s['signal_tier'] == 'high']
     medium_signals = [s for s in recent_signals if s['signal_tier'] == 'medium']
-    low_signals = [s for s in recent_signals if s['signal_tier'] == 'low']
 
     db_stats = db.get_stats()
-    stats = {
-        'queries': db_stats['total_scans'],
-        'candidates': db_stats['active'],
-        'flagged': len(recent_signals),
-        'active': db_stats['active'],
-    }
+    stats = {'active': db_stats['active']}
 
     week_str = datetime.now().strftime('%b %d, %Y')
     subject = f"Founder Scout Weekly — {week_str}"
 
     for recipient in SCOUT_RECIPIENTS:
-        # Email
         email_body = format_briefing_email(
-            recipient['first_name'], high_signals, medium_signals, low_signals, stats
+            recipient['first_name'], high_signals, medium_signals, stats
         )
         print(f"  Sending email to {recipient['email']}...")
         send_email(recipient['email'], subject, email_body)
 
-        # WhatsApp summary
-        wa_message = format_whatsapp_briefing(
-            recipient['first_name'], len(high_signals), len(medium_signals),
-            len(low_signals), db_stats['active']
-        )
-        print(f"  Sending WhatsApp to {recipient['phone']}...")
-        send_whatsapp(recipient['phone'], wa_message)
-
     db.log_scan('weekly_briefing', signals_detected=len(recent_signals))
-    print(f"  Briefing sent: {len(high_signals)} high, {len(medium_signals)} medium, {len(low_signals)} low")
+    print(f"  Briefing sent: {len(high_signals)} high, {len(medium_signals)} medium")
 
 
 def run_watchlist_update():
