@@ -22,7 +22,7 @@ AI-powered investment evaluation that transforms a pitch deck into a comprehensi
 3. User replies "log to hubspot" → `log` searches HubSpot for the company and adds the analysis as a note
 
 **Via Email (automatic):**
-1. Team member emails a deck to christina@groundup.vc → email pipeline extracts deck, creates company + deal in HubSpot
+1. Team member emails a deck to the assistant's email → email pipeline extracts deck, creates company + deal in HubSpot
 2. Sender receives WhatsApp with quick analysis + "Want the full 12-section investment report?"
 3. Sender replies "full report" → same deep analysis flow as above
 
