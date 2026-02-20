@@ -161,6 +161,30 @@ class ScoutDatabase:
             last_run TEXT,
             run_count INTEGER DEFAULT 0
         )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS sent_profiles (
+            linkedin_url TEXT PRIMARY KEY,
+            name TEXT,
+            sent_at TEXT NOT NULL
+        )''')
+        conn.commit()
+        conn.close()
+
+    def is_profile_sent(self, linkedin_url):
+        conn = sqlite3.connect(self.db_path)
+        result = conn.execute(
+            'SELECT 1 FROM sent_profiles WHERE linkedin_url = ?', (linkedin_url,)
+        ).fetchone()
+        conn.close()
+        return result is not None
+
+    def mark_profiles_sent(self, profiles):
+        conn = sqlite3.connect(self.db_path)
+        now = datetime.now().isoformat()
+        for p in profiles:
+            conn.execute(
+                'INSERT OR IGNORE INTO sent_profiles (linkedin_url, name, sent_at) VALUES (?, ?, ?)',
+                (p['linkedin_url'], p['name'], now)
+            )
         conn.commit()
         conn.close()
 
@@ -469,6 +493,60 @@ def extract_profiles_from_search(search_snapshot):
     return profiles
 
 
+def filter_relevant_profiles(profiles):
+    """Use Claude to filter profiles to only those at new/stealth companies from the last 6 months.
+
+    Sends all names+headlines in a single Claude call. Returns the filtered list.
+    """
+    if not profiles:
+        return []
+
+    # Build the list for Claude
+    entries = []
+    for i, p in enumerate(profiles):
+        headline = p.get('headline') or 'No headline'
+        entries.append(f"{i}. {p['name']} — {headline}")
+
+    entries_text = '\n'.join(entries)
+
+    system_prompt = (
+        "You are a VC scout filtering LinkedIn search results. "
+        "We are a first-check VC fund looking for Israeli founders who are starting NEW companies. "
+        "Only include people who appear to be at a new startup or stealth company from the last 6 months."
+    )
+    prompt = f"""Filter this list of LinkedIn profiles. ONLY keep people who match at least one:
+- At a stealth company or unnamed new venture
+- Founded/co-founded something new in the last 6 months (2025-2026)
+- Headline suggests they recently started or are building something new
+- "Ex-" or "Former" role suggesting they recently left to start something
+
+REMOVE people who:
+- Are clearly established at an existing well-known company
+- Have been in the same role for a long time
+- Are investors, VCs, consultants, or advisors (not founders)
+- Have no headline or a generic headline with no startup signals
+
+PROFILES:
+{entries_text}
+
+Return ONLY a JSON array of the index numbers to keep, e.g. [0, 3, 7]
+If none are relevant, return []"""
+
+    response = call_claude(prompt, system_prompt, max_tokens=256)
+    if not response:
+        return profiles  # On failure, return all (don't lose data)
+
+    try:
+        match = re.search(r'\[.*?\]', response)
+        if match:
+            indices = json.loads(match.group())
+            return [profiles[i] for i in indices if isinstance(i, int) and 0 <= i < len(profiles)]
+    except (json.JSONDecodeError, IndexError):
+        print(f"  Could not parse filter response: {response[:200]}", file=sys.stderr)
+
+    return profiles  # On parse failure, return all
+
+
 def analyze_linkedin_profile(name, profile_text, linkedin_url, claude_calls_remaining):
     """Analyze a LinkedIn profile snapshot for startup signals."""
     if claude_calls_remaining <= 0:
@@ -572,8 +650,8 @@ def send_whatsapp(phone, message, max_retries=3, retry_delay=3):
 
 # --- Formatting ---
 
-def format_scan_email(recipient_name, results_by_query):
-    """Format daily scan email with all profiles found per query."""
+def format_scan_email(recipient_name, profiles):
+    """Format daily scan email with relevant profiles."""
     now = datetime.now()
     date_str = now.strftime('%b %d, %Y')
 
@@ -584,12 +662,8 @@ def format_scan_email(recipient_name, results_by_query):
         "",
     ]
 
-    total_profiles = 0
-    for query_key, query_text, profiles in results_by_query:
-        if not profiles:
-            continue
-        total_profiles += len(profiles)
-        lines.append(f"[{query_text}]")
+    if profiles:
+        lines.append(f"{len(profiles)} relevant profiles found:")
         lines.append("-" * 40)
         for i, p in enumerate(profiles, 1):
             headline = p.get('headline') or ''
@@ -598,36 +672,35 @@ def format_scan_email(recipient_name, results_by_query):
                 lines.append(f"   {headline}")
             lines.append(f"   {p['linkedin_url']}")
             lines.append("")
-
-    if total_profiles == 0:
-        lines.append("No results from today's searches.")
+    else:
+        lines.append("No relevant profiles found today.")
         lines.append("")
 
     lines.extend([
-        f"Total: {total_profiles} people from {len(results_by_query)} searches",
-        "",
         f"-- {config.assistant_name}",
     ])
 
     return '\n'.join(lines)
 
 
-def format_scan_whatsapp(recipient_name, results_by_query):
+def format_scan_whatsapp(recipient_name, profiles):
     """Format compact WhatsApp daily scan summary."""
-    total = sum(len(profiles) for _, _, profiles in results_by_query)
-    queries = len(results_by_query)
-
     lines = [
         "Founder Scout Daily",
         "",
-        f"Hi {recipient_name}, today's scan found {total} people across {queries} searches.",
+        f"Hi {recipient_name}, today's scan found {len(profiles)} relevant profiles.",
         "",
     ]
 
-    for query_key, query_text, profiles in results_by_query:
-        if not profiles:
-            continue
-        lines.append(f"{query_text}: {len(profiles)} results")
+    for i, p in enumerate(profiles[:5], 1):
+        headline = p.get('headline') or ''
+        entry = f"{i}. {p['name']}"
+        if headline:
+            entry += f" — {headline[:40]}"
+        lines.append(entry)
+
+    if len(profiles) > 5:
+        lines.append(f"... and {len(profiles) - 5} more")
 
     lines.extend(["", "Full list sent to your email."])
     return '\n'.join(lines)
@@ -704,9 +777,8 @@ def run_daily_scan():
 
     print(f"  Running {len(queue)} LinkedIn searches...")
 
-    results_by_query = []
+    all_new_profiles = []
     seen_urls = set()  # Deduplicate across queries
-    total_profiles = 0
 
     for query_key in queue:
         info = SEARCH_QUERIES[query_key]
@@ -719,42 +791,58 @@ def run_daily_scan():
 
         if not search_snapshot:
             print(f"      No search results returned.")
-            results_by_query.append((query_key, query, []))
             continue
 
-        all_profiles = extract_profiles_from_search(search_snapshot)
-        # Deduplicate: skip profiles already seen in earlier queries
-        new_profiles = []
-        for p in all_profiles:
-            if p['linkedin_url'] not in seen_urls:
-                seen_urls.add(p['linkedin_url'])
-                new_profiles.append(p)
+        profiles = extract_profiles_from_search(search_snapshot)
 
-        results_by_query.append((query_key, query, new_profiles))
-        total_profiles += len(new_profiles)
-        skipped = len(all_profiles) - len(new_profiles)
-        msg = f"      Found {len(new_profiles)} profiles"
+        # Deduplicate across queries and across previous days
+        new_profiles = []
+        for p in profiles:
+            url = p['linkedin_url']
+            if url in seen_urls:
+                continue
+            if db.is_profile_sent(url):
+                continue
+            seen_urls.add(url)
+            new_profiles.append(p)
+
+        skipped = len(profiles) - len(new_profiles)
+        msg = f"      Found {len(new_profiles)} new profiles"
         if skipped:
-            msg += f" ({skipped} duplicates removed)"
+            msg += f" ({skipped} already seen)"
         print(msg)
+        all_new_profiles.extend(new_profiles)
+
+    if not all_new_profiles:
+        print("\n  No new profiles found today.")
+        db.log_scan('daily_search', queries_run=len(queue))
+        return
+
+    # Filter to only relevant founders (new/stealth companies, last 6 months)
+    print(f"\n  Filtering {len(all_new_profiles)} profiles for relevance...")
+    relevant = filter_relevant_profiles(all_new_profiles)
+    print(f"  {len(relevant)} relevant profiles (out of {len(all_new_profiles)})")
+
+    # Mark ALL profiles as sent (including filtered-out ones, so they don't reappear)
+    db.mark_profiles_sent(all_new_profiles)
 
     # Send results to team
-    if total_profiles > 0:
+    if relevant:
         date_str = datetime.now().strftime('%b %d, %Y')
         subject = f"Founder Scout — {date_str}"
 
-        print(f"\n  Sending results ({total_profiles} people) to team...")
+        print(f"\n  Sending results ({len(relevant)} people) to team...")
         for recipient in SCOUT_RECIPIENTS:
-            email_body = format_scan_email(recipient['first_name'], results_by_query)
+            email_body = format_scan_email(recipient['first_name'], relevant)
             send_email(recipient['email'], subject, email_body)
 
-            wa_message = format_scan_whatsapp(recipient['first_name'], results_by_query)
+            wa_message = format_scan_whatsapp(recipient['first_name'], relevant)
             send_whatsapp(recipient['phone'], wa_message)
     else:
-        print("\n  No profiles found today, skipping email.")
+        print("\n  No relevant profiles found today, skipping email.")
 
-    db.log_scan('daily_search', queries_run=len(queue), people_found=total_profiles)
-    print(f"\n  Scan complete: {len(queue)} searches, {total_profiles} profiles found")
+    db.log_scan('daily_search', queries_run=len(queue), people_found=len(relevant))
+    print(f"\n  Scan complete: {len(queue)} searches, {len(relevant)} relevant profiles")
 
 
 def run_weekly_briefing():
