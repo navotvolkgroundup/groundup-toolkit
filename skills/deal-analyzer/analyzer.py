@@ -9,8 +9,8 @@ Phases:
   4. DELIVER  — WhatsApp summary + email full report
 
 Usage:
-  python3 analyzer.py analyze <deck-url> [sender-email]
-  python3 analyzer.py evaluate <deck-url> <phone> [email]
+  python3 analyzer.py analyze <deck-url-or-path> [sender-email]
+  python3 analyzer.py evaluate <deck-url-or-path> <phone> [email]
   python3 analyzer.py test
 """
 
@@ -551,17 +551,23 @@ def extract_deck_links(text):
     return list(dict.fromkeys(links))
 
 
-def fetch_deck_content(url, sender_email=None):
-    if not is_safe_url(url):
-        print(f"  Security: blocked request to disallowed URL: {url}", file=sys.stderr)
+def fetch_deck_content(source, sender_email=None):
+    """Fetch deck content from a URL or local file path (PDF, TXT, etc.)."""
+    # Local file path
+    if source.startswith('/') or source.startswith('./'):
+        return _read_local_file(source)
+
+    # URL
+    if not is_safe_url(source):
+        print(f"  Security: blocked request to disallowed URL: {source}", file=sys.stderr)
         return None
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
         }
-        if 'docsend.com' in url and sender_email:
+        if 'docsend.com' in source and sender_email:
             headers['Cookie'] = f'email={sender_email}'
-        response = requests.get(url, headers=headers, timeout=30, allow_redirects=False)
+        response = requests.get(source, headers=headers, timeout=30, allow_redirects=False)
         # Check redirect doesn't point to internal host
         if response.status_code in (301, 302, 303, 307, 308):
             redirect_url = response.headers.get('Location', '')
@@ -571,10 +577,33 @@ def fetch_deck_content(url, sender_email=None):
             response = requests.get(redirect_url, headers=headers, timeout=30, allow_redirects=False)
         if response.status_code == 200:
             return response.text
-        print(f"  Fetch failed: HTTP {response.status_code} for {url}", file=sys.stderr)
+        print(f"  Fetch failed: HTTP {response.status_code} for {source}", file=sys.stderr)
         return None
     except Exception as e:
         print(f"  Fetch error: {e}", file=sys.stderr)
+        return None
+
+
+def _read_local_file(path):
+    """Read a local file. Converts PDFs to text via pdftotext."""
+    if not os.path.exists(path):
+        print(f"  File not found: {path}", file=sys.stderr)
+        return None
+    try:
+        if path.lower().endswith('.pdf'):
+            result = subprocess.run(
+                ['pdftotext', '-layout', path, '-'],
+                capture_output=True, text=True, timeout=30
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout
+            print(f"  pdftotext failed: {result.stderr.strip()[:200]}", file=sys.stderr)
+            return None
+        else:
+            with open(path, 'r', errors='ignore') as f:
+                return f.read()
+    except Exception as e:
+        print(f"  File read error: {e}", file=sys.stderr)
         return None
 
 
