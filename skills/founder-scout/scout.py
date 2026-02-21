@@ -400,21 +400,61 @@ def linkedin_search(query):
         return None
 
 
+def _strip_aria_chrome(aria_text):
+    """Strip LinkedIn navigation chrome from ARIA snapshot, keeping profile content.
+
+    Extracts only lines containing useful profile info (name, headline, experience,
+    about, education, etc.) and removes verbose ARIA tree structure.
+    """
+    useful_lines = []
+    in_profile = False
+    for line in aria_text.split('\n'):
+        stripped = line.strip()
+        # Skip empty lines and pure structure lines
+        if not stripped or stripped.startswith('- none') or stripped.startswith('- generic'):
+            continue
+        # Detect start of profile content (past the nav bar)
+        if 'heading "' in stripped and not in_profile:
+            # Check if this is the person's name heading (first real heading after nav)
+            if any(kw in stripped.lower() for kw in ['experience', 'about', 'education']):
+                in_profile = True
+            elif 'LinkedIn' not in stripped and 'Navigation' not in stripped:
+                in_profile = True
+        if not in_profile:
+            continue
+        # Extract text content from ARIA lines
+        if 'StaticText "' in stripped:
+            text = re.search(r'StaticText "([^"]*)"', stripped)
+            if text:
+                useful_lines.append(text.group(1))
+        elif 'heading "' in stripped:
+            text = re.search(r'heading "([^"]*)"', stripped)
+            if text:
+                useful_lines.append(f"\n## {text.group(1)}")
+        elif 'link "' in stripped:
+            text = re.search(r'link "([^"]*)"', stripped)
+            if text and len(text.group(1)) > 3:
+                useful_lines.append(text.group(1))
+    return '\n'.join(useful_lines)
+
+
 def linkedin_profile_lookup(url):
-    """Look up a LinkedIn profile using the browser skill. Returns snapshot text."""
+    """Look up a LinkedIn profile using the browser skill. Returns cleaned profile text."""
     try:
         subprocess.run(
             ['openclaw', 'browser', 'navigate', '--browser-profile', LINKEDIN_BROWSER_PROFILE, url],
             capture_output=True, text=True, timeout=15
         )
-        time.sleep(3)
+        time.sleep(5)
 
         result = subprocess.run(
             ['openclaw', 'browser', 'snapshot', '--browser-profile', LINKEDIN_BROWSER_PROFILE,
-             '--format', 'aria', '--limit', '300'],
+             '--format', 'aria', '--limit', '1000'],
             capture_output=True, text=True, timeout=15
         )
-        return result.stdout if result.returncode == 0 else None
+        if result.returncode != 0 or not result.stdout:
+            return None
+        return _strip_aria_chrome(result.stdout)
     except Exception as e:
         print(f"  LinkedIn profile lookup error: {e}", file=sys.stderr)
         return None
@@ -576,18 +616,20 @@ def filter_relevant_profiles(profiles):
 
 
 def analyze_linkedin_profile(name, profile_text, linkedin_url, claude_calls_remaining):
-    """Analyze a LinkedIn profile snapshot for startup signals."""
+    """Analyze a LinkedIn profile snapshot — is this person starting something new?
+
+    Returns dict with: name, relevant (bool), summary, current_title, linkedin_url.
+    Uses full profile data (experience, about, headline) for accurate assessment.
+    """
     if claude_calls_remaining <= 0:
         return None
 
     system_prompt = (
-        "You are a VC scout analyzing a LinkedIn profile for signs that this person "
-        "is about to start a new company. Look for: recent role changes, gaps in employment, "
-        "'open to work' status, stealth references, pivot from corporate to startup, "
-        "advisory roles at multiple startups, '8200' or 'Talpiot' background, "
-        "serial entrepreneur patterns."
+        "You are a VC scout for a first-check fund. Your job is to determine whether "
+        "a person is CURRENTLY starting a new company (founded in the last 6 months) or "
+        "is clearly about to. You have access to their full LinkedIn profile."
     )
-    prompt = f"""Analyze this LinkedIn profile for "about to start a company" signals.
+    prompt = f"""Analyze this LinkedIn profile. Is this person starting a NEW company?
 
 NAME: {name}
 LINKEDIN URL: {linkedin_url}
@@ -595,16 +637,23 @@ LINKEDIN URL: {linkedin_url}
 PROFILE DATA:
 {profile_text[:4000]}
 
-Return ONLY valid JSON (no markdown, no explanation):
-{{"name": "{name}", "signals": ["signal1", "signal2"], "confidence": "high|medium|low|none", "summary": "One sentence description", "current_title": "their current role or null", "linkedin_url": "{linkedin_url}"}}
+Answer with ONLY valid JSON (no markdown):
+{{"name": "{name}", "relevant": true/false, "summary": "1-2 sentence explanation", "current_title": "their current role", "linkedin_url": "{linkedin_url}"}}
 
-Rules:
-- signals: list of specific observations (e.g. "Left CTO role at Company X in Jan 2026", "Profile shows 'Open to work' badge")
-- confidence: high = strong evidence of starting something new, medium = suggestive signals, low = weak hints only
-- If this person is clearly established at an existing company with no change signals, return confidence "none"
-- If no real signals found, return: {{"name": "{name}", "signals": [], "confidence": "none", "summary": "No startup signals detected", "current_title": null, "linkedin_url": "{linkedin_url}"}}"""
+RELEVANT (true) means:
+- They recently founded or co-founded a new company (last ~6 months)
+- They are at a stealth startup or building something unnamed
+- Their profile explicitly says they are starting something new
 
-    response = call_claude(prompt, system_prompt, max_tokens=512)
+NOT RELEVANT (false) means:
+- They are a founder/CEO at an ESTABLISHED company (founded years ago)
+- They are an investor, VC partner, advisor, or consultant
+- They left a job but are not clearly starting something new
+- They are at a known company in a senior role
+- They are a serial entrepreneur promoting past exits, not a current new venture
+- Any ambiguity — when in doubt, return false"""
+
+    response = call_claude(prompt, system_prompt, max_tokens=300)
     if not response:
         return None
 
@@ -695,9 +744,15 @@ def format_scan_email(recipient_name, profiles):
         lines.append("-" * 40)
         for i, p in enumerate(profiles, 1):
             headline = p.get('headline') or ''
+            summary = p.get('analysis_summary') or ''
+            title = p.get('current_title') or ''
             lines.append(f"{i}. {p['name']}")
-            if headline:
+            if title:
+                lines.append(f"   {title}")
+            elif headline:
                 lines.append(f"   {headline}")
+            if summary:
+                lines.append(f"   Why: {summary}")
             lines.append(f"   {p['linkedin_url']}")
             lines.append("")
     else:
@@ -721,10 +776,13 @@ def format_scan_whatsapp(recipient_name, profiles):
     ]
 
     for i, p in enumerate(profiles[:5], 1):
-        headline = p.get('headline') or ''
+        summary = p.get('analysis_summary') or ''
+        title = p.get('current_title') or p.get('headline') or ''
         entry = f"{i}. {p['name']}"
-        if headline:
-            entry += f" — {headline[:40]}"
+        if title:
+            entry += f" — {title[:50]}"
+        if summary:
+            entry += f"\n   {summary[:80]}"
         lines.append(entry)
 
     if len(profiles) > 5:
@@ -846,13 +904,52 @@ def run_daily_scan():
         db.log_scan('daily_search', queries_run=len(queue))
         return
 
-    # Filter to only relevant founders (new/stealth companies, last 6 months)
-    print(f"\n  Filtering {len(all_new_profiles)} profiles for relevance...")
-    relevant = filter_relevant_profiles(all_new_profiles)
-    print(f"  {len(relevant)} relevant profiles (out of {len(all_new_profiles)})")
+    # Phase 1: Keyword filter on headlines (fast, removes obvious non-matches)
+    print(f"\n  Phase 1: Keyword filtering {len(all_new_profiles)} profiles...")
+    keyword_matches = filter_relevant_profiles(all_new_profiles)
+    print(f"  {len(keyword_matches)} passed keyword filter (out of {len(all_new_profiles)})")
 
     # Mark ALL profiles as sent (including filtered-out ones, so they don't reappear)
     db.mark_profiles_sent(all_new_profiles)
+
+    if not keyword_matches:
+        print("\n  No relevant profiles found today, skipping email.")
+        db.log_scan('daily_search', queries_run=len(queue), people_found=0)
+        print(f"\n  Scan complete: {len(queue)} searches, 0 relevant profiles")
+        return
+
+    # Phase 2: Visit each profile + Claude deep filter (accurate, ~15s per profile)
+    print(f"\n  Phase 2: Visiting {len(keyword_matches)} profiles for deep analysis...")
+    relevant = []
+    for i, p in enumerate(keyword_matches, 1):
+        name = p['name']
+        url = p['linkedin_url']
+        print(f"    [{i}/{len(keyword_matches)}] Visiting {name}...")
+
+        profile_text = linkedin_profile_lookup(url)
+        time.sleep(LINKEDIN_NAV_DELAY)
+
+        if not profile_text:
+            print(f"      Could not load profile, skipping.")
+            continue
+
+        analysis = analyze_linkedin_profile(name, profile_text, url, MAX_CLAUDE_CALLS_PER_SCAN - len(relevant))
+        if not analysis:
+            print(f"      Claude analysis failed, skipping.")
+            continue
+
+        if analysis.get('relevant'):
+            summary = analysis.get('summary', '')
+            title = analysis.get('current_title', '')
+            print(f"      RELEVANT: {summary}")
+            p['analysis_summary'] = summary
+            p['current_title'] = title
+            relevant.append(p)
+        else:
+            summary = analysis.get('summary', 'Not relevant')
+            print(f"      Filtered out: {summary}")
+
+    print(f"\n  {len(relevant)} confirmed relevant (out of {len(keyword_matches)} keyword matches)")
 
     # Send results to team
     if relevant:
@@ -867,7 +964,7 @@ def run_daily_scan():
             wa_message = format_scan_whatsapp(recipient['first_name'], relevant)
             send_whatsapp(recipient['phone'], wa_message)
     else:
-        print("\n  No relevant profiles found today, skipping email.")
+        print("\n  No relevant profiles after deep analysis, skipping email.")
 
     db.log_scan('daily_search', queries_run=len(queue), people_found=len(relevant))
     print(f"\n  Scan complete: {len(queue)} searches, {len(relevant)} relevant profiles")
