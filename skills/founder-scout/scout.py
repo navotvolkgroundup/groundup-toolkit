@@ -514,17 +514,20 @@ def filter_relevant_profiles(profiles):
         "We are a first-check VC fund looking for Israeli founders who are starting NEW companies. "
         "Only include people who appear to be at a new startup or stealth company from the last 6 months."
     )
-    prompt = f"""Filter this list of LinkedIn profiles. ONLY keep people who match at least one:
-- At a stealth company or unnamed new venture
-- Founded/co-founded something new in the last 6 months (2025-2026)
-- Headline suggests they recently started or are building something new
-- "Ex-" or "Former" role suggesting they recently left to start something
+    prompt = f"""Filter this list of LinkedIn profiles. Be VERY strict — ONLY keep people whose headline explicitly shows:
+- "Stealth", "stealth mode", or building an unnamed/new company
+- "Co-founder" or "Founder" at a company you don't recognize (likely new)
+- "Building something new", "next chapter", "new venture" or similar language
+- Headline explicitly mentions starting or launching something
 
-REMOVE people who:
-- Are clearly established at an existing well-known company
-- Have been in the same role for a long time
-- Are investors, VCs, consultants, or advisors (not founders)
-- Have no headline or a generic headline with no startup signals
+REMOVE everyone else, including:
+- People with just "Ex-" or "Former" in their title (leaving a job is not enough)
+- Generic titles like "CTO", "VP Engineering", "CEO" at known companies
+- People at established companies (Wix, Monday, Check Point, etc.)
+- Investors, VCs, consultants, advisors, mentors
+- Generic or missing headlines — when in doubt, REMOVE
+
+We only want people who are CLEARLY starting something new. If you're not sure, remove them.
 
 PROFILES:
 {entries_text}

@@ -19,6 +19,7 @@ import os
 import re
 import json
 import time
+import shlex
 import subprocess
 import tempfile
 import requests
@@ -156,10 +157,251 @@ def send_email(to_email, subject, body):
         return False
 
 
+# --- Google Docs ---
+
+GOG_CREDENTIALS_PATH = "/root/.config/gogcli/credentials.json"
+
+
+def get_google_access_token():
+    """Get a Google OAuth2 access token using gog's stored credentials."""
+    try:
+        creds = json.load(open(GOG_CREDENTIALS_PATH))
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"  Could not read gog credentials: {e}", file=sys.stderr)
+        return None
+
+    fd, token_path = tempfile.mkstemp(suffix='.json', prefix='gog-token-')
+    os.close(fd)
+    try:
+        result = subprocess.run(
+            ['gog', 'auth', 'tokens', 'export', GOG_ACCOUNT,
+             '--out', token_path, '--overwrite', '--no-input'],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode != 0:
+            print(f"  gog token export failed: {result.stderr.strip()[:200]}", file=sys.stderr)
+            return None
+
+        token_data = json.load(open(token_path))
+    finally:
+        try:
+            os.unlink(token_path)
+        except OSError:
+            pass
+
+    response = requests.post('https://oauth2.googleapis.com/token', data={
+        'client_id': creds['client_id'],
+        'client_secret': creds['client_secret'],
+        'refresh_token': token_data['refresh_token'],
+        'grant_type': 'refresh_token',
+    }, timeout=10)
+
+    if response.status_code == 200:
+        return response.json()['access_token']
+
+    print(f"  Token exchange failed: {response.status_code} {response.text[:200]}", file=sys.stderr)
+    return None
+
+
+def html_escape(text):
+    """Escape HTML special characters."""
+    return (text
+            .replace('&', '&amp;')
+            .replace('<', '&lt;')
+            .replace('>', '&gt;')
+            .replace('"', '&quot;'))
+
+
+def markdown_to_html(text):
+    """Convert basic markdown to HTML."""
+    if not text:
+        return ''
+    lines = text.split('\n')
+    html_lines = []
+    in_list = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped in ('---', '***', '___'):
+            if in_list:
+                html_lines.append('</ul>')
+                in_list = False
+            html_lines.append('<hr>')
+            continue
+
+        if stripped.startswith('### '):
+            if in_list:
+                html_lines.append('</ul>')
+                in_list = False
+            html_lines.append(f'<h3>{html_escape(stripped[4:])}</h3>')
+            continue
+        if stripped.startswith('## '):
+            if in_list:
+                html_lines.append('</ul>')
+                in_list = False
+            html_lines.append(f'<h2>{html_escape(stripped[3:])}</h2>')
+            continue
+        if stripped.startswith('# '):
+            if in_list:
+                html_lines.append('</ul>')
+                in_list = False
+            html_lines.append(f'<h1>{html_escape(stripped[2:])}</h1>')
+            continue
+
+        # Bold
+        stripped = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', stripped)
+
+        # Bullet points
+        if stripped.startswith('- ') or stripped.startswith('* '):
+            if not in_list:
+                html_lines.append('<ul>')
+                in_list = True
+            html_lines.append(f'<li>{stripped[2:]}</li>')
+            continue
+
+        if not stripped:
+            if in_list:
+                html_lines.append('</ul>')
+                in_list = False
+            continue
+
+        if in_list:
+            html_lines.append('</ul>')
+            in_list = False
+        html_lines.append(f'<p>{stripped}</p>')
+
+    if in_list:
+        html_lines.append('</ul>')
+
+    return '\n'.join(html_lines)
+
+
+def format_report_html(deck_data, section_results):
+    """Generate a professionally styled HTML report for Google Docs."""
+    company = html_escape(deck_data.get('company_name') or 'Unknown Company')
+    date = datetime.now().strftime('%B %d, %Y')
+    tldr = html_escape(section_results.get('tldr', ''))
+
+    sections_html = []
+    for section in ANALYSIS_SECTIONS:
+        content = section_results.get(section['id'], 'Analysis not available.')
+        sections_html.append(markdown_to_html(content))
+
+    memo_html = markdown_to_html(section_results.get('investment_memo', ''))
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<style>
+body {{ font-family: 'Arial', sans-serif; color: #333; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 40px 20px; }}
+h1 {{ color: #1a1a2e; font-size: 28px; border-bottom: 3px solid #16213e; padding-bottom: 10px; }}
+h2 {{ color: #16213e; font-size: 22px; margin-top: 30px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }}
+h3 {{ color: #0f3460; font-size: 18px; }}
+.subtitle {{ color: #666; font-size: 14px; margin-bottom: 20px; }}
+.tldr {{ background: #f0f4ff; border-left: 4px solid #1a1a2e; padding: 15px 20px; margin: 20px 0; font-size: 15px; }}
+.section {{ margin-bottom: 30px; }}
+hr {{ border: none; border-top: 1px solid #e0e0e0; margin: 30px 0; }}
+.disclaimer {{ color: #999; font-size: 12px; font-style: italic; margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; }}
+strong {{ color: #1a1a2e; }}
+ul, ol {{ padding-left: 25px; }}
+li {{ margin-bottom: 5px; }}
+</style>
+</head>
+<body>
+<h1>Investment Analysis: {company}</h1>
+<p class="subtitle">Generated: {date} | GroundUp Ventures Deal Evaluation</p>
+
+<div class="tldr">
+<strong>TL;DR:</strong> {tldr}
+</div>
+
+<hr>
+
+{''.join(f'<div class="section">{s}</div><hr>' for s in sections_html)}
+
+<div class="section">
+<h2>12. Investment Memo Summary</h2>
+{memo_html}
+</div>
+
+<hr>
+
+<p class="disclaimer">This analysis was generated by GroundUp's AI deal evaluation system.
+All assessments should be validated through direct founder engagement and independent due diligence.</p>
+
+</body>
+</html>"""
+
+
+def create_google_doc(deck_data, section_results):
+    """Create a Google Doc from the analysis report. Returns (doc_url, doc_id) or (None, None)."""
+    company = deck_data.get('company_name') or 'Unknown Company'
+    date = datetime.now().strftime('%Y-%m-%d')
+    doc_title = f"Deal Evaluation: {company} ({date})"
+
+    print(f"  Creating Google Doc: {doc_title}...")
+
+    access_token = get_google_access_token()
+    if not access_token:
+        print("  Could not get Google access token, skipping Google Doc.", file=sys.stderr)
+        return (None, None)
+
+    html_content = format_report_html(deck_data, section_results)
+
+    # Upload HTML as Google Doc via Drive API multipart upload
+    metadata = json.dumps({
+        'name': doc_title,
+        'mimeType': 'application/vnd.google-apps.document',
+    })
+    boundary = '---deal-report-boundary---'
+    body = (
+        f'--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'
+        f'{metadata}\r\n'
+        f'--{boundary}\r\nContent-Type: text/html\r\n\r\n'
+    ).encode('utf-8') + html_content.encode('utf-8') + f'\r\n--{boundary}--\r\n'.encode('utf-8')
+
+    try:
+        resp = requests.post(
+            'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+            headers={
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': f'multipart/related; boundary={boundary}',
+            },
+            data=body,
+            timeout=30,
+        )
+
+        if resp.status_code not in (200, 201):
+            print(f"  Drive upload failed: {resp.status_code} {resp.text[:200]}", file=sys.stderr)
+            return (None, None)
+
+        doc_id = resp.json()['id']
+
+        # Share: anyone with link can view
+        requests.post(
+            f'https://www.googleapis.com/drive/v3/files/{doc_id}/permissions',
+            headers={
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json',
+            },
+            json={'role': 'reader', 'type': 'anyone'},
+            timeout=10,
+        )
+
+        doc_url = f"https://docs.google.com/document/d/{doc_id}/edit"
+        print(f"  Google Doc created: {doc_url}")
+        return (doc_url, doc_id)
+
+    except Exception as e:
+        print(f"  Google Doc creation failed: {e}", file=sys.stderr)
+        return (None, None)
+
+
 # --- State Management ---
 
 
-def save_state(deck_data, section_results=None, tldr=None, deck_url=None):
+def save_state(deck_data, section_results=None, tldr=None, deck_url=None, doc_url=None):
     """Save analysis state so the log action can read it later."""
     state = {
         'deck_data': deck_data,
@@ -168,8 +410,10 @@ def save_state(deck_data, section_results=None, tldr=None, deck_url=None):
     }
     if deck_url:
         state['deck_url'] = deck_url
+    if doc_url:
+        state['doc_url'] = doc_url
     if section_results:
-        state['hubspot_note'] = format_hubspot_note(deck_data, section_results, tldr)
+        state['hubspot_note'] = format_hubspot_note(deck_data, section_results, tldr, doc_url=doc_url)
     # Write atomically with restricted permissions (owner-only)
     fd, tmp_path = tempfile.mkstemp(suffix='.json', prefix='deal-state-', dir='/tmp')
     try:
@@ -996,7 +1240,7 @@ def format_full_report(deck_data, section_results):
     return '\n'.join(parts)
 
 
-def format_whatsapp_summary(deck_data, section_results):
+def format_whatsapp_summary(deck_data, section_results, doc_url=None):
     company = deck_data.get('company_name') or 'Unknown Company'
     tldr = section_results.get('tldr', '')
     memo = section_results.get('investment_memo', '')
@@ -1004,6 +1248,8 @@ def format_whatsapp_summary(deck_data, section_results):
 
     # Truncate memo to fit WhatsApp limit
     memo_text = memo[:2500] if len(memo) > 2500 else memo
+
+    link_line = f"*Full Report:* {doc_url}" if doc_url else "_Full 12-section report sent to your email._"
 
     return f"""*Deal Evaluation: {company}*
 {date}
@@ -1013,10 +1259,10 @@ def format_whatsapp_summary(deck_data, section_results):
 {memo_text}
 
 ---
-_Full 12-section report sent to your email._"""
+{link_line}"""
 
 
-def format_hubspot_note(deck_data, section_results, tldr=None):
+def format_hubspot_note(deck_data, section_results, tldr=None, doc_url=None):
     """Format a condensed version for HubSpot company notes."""
     company = deck_data.get('company_name') or 'Unknown Company'
     tldr = tldr or section_results.get('tldr', '')
@@ -1026,6 +1272,8 @@ def format_hubspot_note(deck_data, section_results, tldr=None):
         f"DEAL EVALUATION: {company} (AI-Generated, {datetime.now().strftime('%b %d %Y')})",
         "",
     ]
+    if doc_url:
+        parts.extend([f"Full report: {doc_url}", ""])
     if tldr:
         parts.extend([f"TL;DR: {tldr}", ""])
 
@@ -1037,6 +1285,26 @@ def format_hubspot_note(deck_data, section_results, tldr=None):
     return '\n'.join(parts)
 
 
+def format_email_with_link(deck_data, section_results, doc_url):
+    """Format email with TL;DR summary and link to Google Doc."""
+    company = deck_data.get('company_name') or 'Unknown Company'
+    date = datetime.now().strftime('%B %d, %Y')
+    tldr = section_results.get('tldr', '')
+
+    return f"""Deal Evaluation: {company}
+{date}
+
+TL;DR
+{tldr}
+
+Full 12-Section Report
+{doc_url}
+
+---
+This analysis was generated by GroundUp's AI deal evaluation system.
+All assessments should be validated through direct founder engagement and independent due diligence."""
+
+
 def deliver_results(deck_data, section_results, phone, email=None):
     company = deck_data.get('company_name') or 'Unknown Company'
 
@@ -1046,17 +1314,23 @@ def deliver_results(deck_data, section_results, phone, email=None):
         if member:
             email = member['email']
 
-    # WhatsApp: executive summary
-    wa_summary = format_whatsapp_summary(deck_data, section_results)
+    # Create Google Doc
+    doc_url, doc_id = create_google_doc(deck_data, section_results)
+
+    # WhatsApp: executive summary + doc link
+    wa_summary = format_whatsapp_summary(deck_data, section_results, doc_url=doc_url)
     send_whatsapp(phone, wa_summary)
 
-    # Email: full report
+    # Email: TL;DR + doc link (or full report as fallback)
     if email:
-        full_report = format_full_report(deck_data, section_results)
-        send_email(email, f"Deal Evaluation: {company}", full_report)
+        if doc_url:
+            email_body = format_email_with_link(deck_data, section_results, doc_url)
+        else:
+            email_body = format_full_report(deck_data, section_results)
+        send_email(email, f"Deal Evaluation: {company}", email_body)
 
-    # Save state for HubSpot logging
-    save_state(deck_data, section_results, section_results.get('tldr'))
+    # Save state for HubSpot logging (include doc_url)
+    save_state(deck_data, section_results, section_results.get('tldr'), doc_url=doc_url)
 
     # Ask about HubSpot
     send_whatsapp(phone, f"Want me to log this analysis to HubSpot under *{company}*? Just reply 'log to hubspot'.")
