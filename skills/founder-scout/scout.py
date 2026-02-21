@@ -494,60 +494,85 @@ def extract_profiles_from_search(search_snapshot):
 
 
 def filter_relevant_profiles(profiles):
-    """Use Claude to filter profiles to only those at new/stealth companies from the last 6 months.
+    """Filter profiles by headline keywords — only keep people clearly starting something new.
 
-    Sends all names+headlines in a single Claude call. Returns the filtered list.
+    Uses deterministic keyword matching instead of Claude (which can't distinguish
+    established founders from new ones based on short headlines alone).
     """
     if not profiles:
         return []
 
-    # Build the list for Claude
-    entries = []
-    for i, p in enumerate(profiles):
-        headline = p.get('headline') or 'No headline'
-        entries.append(f"{i}. {p['name']} — {headline}")
+    # Positive signals — headline must contain at least one of these
+    POSITIVE_SIGNALS = [
+        'stealth', 'stealth mode',
+        'building something', 'building the future', 'building a ', 'building in ',
+        'new venture', 'new startup', 'new company',
+        'next chapter', "what's next", 'whats next', 'exploring next',
+        'launching', 'just launched',
+        'pre-seed', 'pre seed', 'preseed',
+        'in formation', 'day one', 'day 1',
+        'working on something new', 'starting something',
+        'left to start', 'left to build', 'left to found',
+        'formerly at', 'formerly @',  # "formerly at X" + no current title = signal
+    ]
 
-    entries_text = '\n'.join(entries)
+    # Negative signals — remove even if positive signal matches
+    NEGATIVE_TITLES = [
+        'investor', 'venture capital', 'vc ', ' vc', 'partner at',
+        'managing partner', 'general partner', 'limited partner',
+        'angel investor', 'board member', 'board of directors',
+        'advisor', 'adviser', 'consultant', 'consulting',
+        'mentor', 'coach', 'speaker', 'author',
+        'professor', 'lecturer', 'academic', 'researcher',
+        'journalist', 'reporter', 'editor',
+        'recruiter', 'talent', 'hiring',
+    ]
 
-    system_prompt = (
-        "You are a VC scout filtering LinkedIn search results. "
-        "We are a first-check VC fund looking for Israeli founders who are starting NEW companies. "
-        "Only include people who appear to be at a new startup or stealth company from the last 6 months."
-    )
-    prompt = f"""Filter this list of LinkedIn profiles. Be VERY strict — ONLY keep people whose headline explicitly shows:
-- "Stealth", "stealth mode", or building an unnamed/new company
-- "Co-founder" or "Founder" at a company you don't recognize (likely new)
-- "Building something new", "next chapter", "new venture" or similar language
-- Headline explicitly mentions starting or launching something
+    # Known established companies — founders/CEOs at these are NOT new founders
+    ESTABLISHED_COMPANIES = [
+        'wix', 'monday', 'check point', 'checkpoint', 'nice', 'amdocs',
+        'fiverr', 'similarweb', 'taboola', 'outbrain', 'playtika',
+        'ironource', 'ironsource', 'jvp', 'jerusalem venture',
+        'viola', 'pitango', 'magma', 'vertex', 'aleph', 'grove ventures',
+        'insight partners', 'sequoia', 'a16z', 'ycombinator', 'y combinator',
+        'qumra', 'glilot', 'entree capital', 'ourcrowd', 'leumitech',
+        'microsoft', 'google', 'meta', 'facebook', 'amazon', 'apple',
+        'intel', 'nvidia', 'salesforce', 'oracle', 'ibm', 'cisco',
+        'paypal', 'stripe', 'tiktok', 'bytedance', 'uber', 'airbnb',
+        'mobileye', 'mellanox', 'cyberark', 'varonis', 'sapiens',
+        'elbit', 'rafael', 'iai ', 'israel aerospace',
+    ]
 
-REMOVE everyone else, including:
-- People with just "Ex-" or "Former" in their title (leaving a job is not enough)
-- Generic titles like "CTO", "VP Engineering", "CEO" at known companies
-- People at established companies (Wix, Monday, Check Point, etc.)
-- Investors, VCs, consultants, advisors, mentors
-- Generic or missing headlines — when in doubt, REMOVE
+    filtered = []
+    for p in profiles:
+        headline = (p.get('headline') or '').lower().strip()
+        if not headline or headline == 'no headline':
+            continue
 
-We only want people who are CLEARLY starting something new. If you're not sure, remove them.
+        # Check for negative signals first
+        has_negative = any(neg in headline for neg in NEGATIVE_TITLES)
+        if has_negative:
+            print(f"  Filtered out (negative): {p['name']} — {headline}", file=sys.stderr)
+            continue
 
-PROFILES:
-{entries_text}
+        # Check for established companies — but skip this check if headline
+        # indicates they LEFT that company (ex-, former, formerly, left)
+        has_left_prefix = any(prefix in headline for prefix in ['ex-', 'former ', 'formerly ', 'left '])
+        if not has_left_prefix:
+            at_established = any(co in headline for co in ESTABLISHED_COMPANIES)
+            if at_established:
+                print(f"  Filtered out (established co): {p['name']} — {headline}", file=sys.stderr)
+                continue
 
-Return ONLY a JSON array of the index numbers to keep, e.g. [0, 3, 7]
-If none are relevant, return []"""
+        # Check for positive signals
+        has_positive = any(sig in headline for sig in POSITIVE_SIGNALS)
+        if has_positive:
+            print(f"  Kept (positive signal): {p['name']} — {headline}", file=sys.stderr)
+            filtered.append(p)
+        else:
+            print(f"  Filtered out (no signal): {p['name']} — {headline}", file=sys.stderr)
 
-    response = call_claude(prompt, system_prompt, max_tokens=256)
-    if not response:
-        return profiles  # On failure, return all (don't lose data)
-
-    try:
-        match = re.search(r'\[.*?\]', response)
-        if match:
-            indices = json.loads(match.group())
-            return [profiles[i] for i in indices if isinstance(i, int) and 0 <= i < len(profiles)]
-    except (json.JSONDecodeError, IndexError):
-        print(f"  Could not parse filter response: {response[:200]}", file=sys.stderr)
-
-    return profiles  # On parse failure, return all
+    return filtered
 
 
 def analyze_linkedin_profile(name, profile_text, linkedin_url, claude_calls_remaining):
