@@ -49,18 +49,37 @@ EMAIL_TO_PHONE = {email: phone for phone, email in TEAM_PHONES.items()}
 # Deal analyzer state file (shared with skills/deal-analyzer)
 DEAL_ANALYZER_STATE = '/tmp/deal-analyzer-state.json'
 
-def run_gog_command(cmd):
+def _gog_env():
+    """Get environment with GOG keyring password set."""
     env = os.environ.copy()
     env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-    full_cmd = f'source ~/.profile && gog {cmd} --account {shlex.quote(GOG_ACCOUNT)} --json'
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable='/bin/bash', env=env)
+    return env
+
+def _run_gog(args, json_output=True):
+    """Run a gog command safely without shell=True.
+
+    Args:
+        args: list of arguments after 'gog', e.g. ['gmail', 'search', query, '--limit', '20']
+        json_output: if True, append --json and parse output as JSON
+    """
+    cmd = ['gog'] + args + ['--account', GOG_ACCOUNT]
+    if json_output:
+        cmd.append('--json')
+    result = subprocess.run(cmd, capture_output=True, text=True, env=_gog_env())
     if result.returncode != 0:
-        print(f'Error running gog: {result.stderr}', file=sys.stderr)
+        print(f'Error running gog: {result.stderr[:200]}', file=sys.stderr)
         return None
-    try:
-        return json.loads(result.stdout)
-    except Exception:
-        return result.stdout
+    if json_output:
+        try:
+            return json.loads(result.stdout)
+        except Exception:
+            return result.stdout
+    return result
+
+def run_gog_command(cmd):
+    """Legacy wrapper — parses a command string into args for _run_gog."""
+    args = shlex.split(cmd)
+    return _run_gog(args)
 
 def check_recent_emails():
     print(f'[{datetime.now()}] Checking for new emails...')
@@ -228,21 +247,17 @@ View deal: {deal_url}
     try:
         with os.fdopen(body_fd, 'w') as f:
             f.write(message)
-        env = os.environ.copy()
-        env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-        full_cmd = (
-            f'source ~/.profile && gog gmail send'
-            f' --to {shlex.quote(to_email)}'
-            f' --subject {shlex.quote("Deal Created: " + company_name)}'
-            f' --body-file {shlex.quote(body_path)}'
-            f' --account {shlex.quote(GOG_ACCOUNT)}'
-        )
-        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable='/bin/bash', env=env)
-        if result.returncode == 0:
+        result = _run_gog([
+            'gmail', 'send',
+            '--to', to_email,
+            '--subject', f'Deal Created: {company_name}',
+            '--body-file', body_path,
+        ], json_output=False)
+        if result and result.returncode == 0:
             print(f'Sent confirmation email to {to_email}')
             return True
         else:
-            print(f'Error sending confirmation: {result.stderr}', file=sys.stderr)
+            print(f'Error sending confirmation', file=sys.stderr)
             return False
     finally:
         try:
@@ -252,32 +267,26 @@ View deal: {deal_url}
 
 def mark_email_processed(thread_id):
     """Add processed label, mark as read, and archive - with fallback if label fails"""
-    env = os.environ.copy()
-    env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-    full_cmd = (
-        f'source ~/.profile && gog gmail thread modify {shlex.quote(thread_id)}'
-        f' --account {shlex.quote(GOG_ACCOUNT)}'
-        f' --add {shlex.quote(PROCESSED_LABEL)} --remove UNREAD,INBOX --force'
-    )
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable='/bin/bash', env=env)
+    result = _run_gog([
+        'gmail', 'thread', 'modify', thread_id,
+        '--add', PROCESSED_LABEL, '--remove', 'UNREAD,INBOX', '--force',
+    ], json_output=False)
 
-    if result.returncode == 0:
+    if result and result.returncode == 0:
         print(f'Marked email as processed and archived')
         return True
     else:
-        print(f'Warning: Could not add label, archiving anyway: {result.stderr}', file=sys.stderr)
-        fallback_cmd = (
-            f'source ~/.profile && gog gmail thread modify {shlex.quote(thread_id)}'
-            f' --account {shlex.quote(GOG_ACCOUNT)}'
-            f' --remove UNREAD,INBOX --force'
-        )
-        fallback_result = subprocess.run(fallback_cmd, shell=True, capture_output=True, text=True, executable='/bin/bash', env=env)
+        print(f'Warning: Could not add label, archiving anyway', file=sys.stderr)
+        fallback = _run_gog([
+            'gmail', 'thread', 'modify', thread_id,
+            '--remove', 'UNREAD,INBOX', '--force',
+        ], json_output=False)
 
-        if fallback_result.returncode == 0:
+        if fallback and fallback.returncode == 0:
             print(f'Archived email (without label)')
             return True
         else:
-            print(f'Error archiving email: {fallback_result.stderr}', file=sys.stderr)
+            print(f'Error archiving email', file=sys.stderr)
             return False
 
 def send_whatsapp(phone, message):
@@ -634,21 +643,17 @@ def send_email_simple(to_email, subject, body):
     try:
         with os.fdopen(body_fd, 'w') as f:
             f.write(body)
-        env = os.environ.copy()
-        env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-        full_cmd = (
-            f'source ~/.profile && gog gmail send'
-            f' --to {shlex.quote(to_email)}'
-            f' --subject {shlex.quote(subject)}'
-            f' --body-file {shlex.quote(body_path)}'
-            f' --account {shlex.quote(GOG_ACCOUNT)}'
-        )
-        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash", env=env)
-        if result.returncode == 0:
+        result = _run_gog([
+            'gmail', 'send',
+            '--to', to_email,
+            '--subject', subject,
+            '--body-file', body_path,
+        ], json_output=False)
+        if result and result.returncode == 0:
             print(f'    Sent confirmation email to {to_email}')
             return True
         else:
-            print(f'    Error sending email: {result.stderr}', file=sys.stderr)
+            print(f'    Error sending email', file=sys.stderr)
             return False
     finally:
         try:
@@ -1088,20 +1093,15 @@ def download_attachment(message_id, attachment_id, filename):
             print(f'  Security: rejected suspicious filename: {filename}', file=sys.stderr)
             return None
 
-        env = os.environ.copy()
-        env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-        full_cmd = (
-            f'source ~/.profile && gog gmail attachment'
-            f' {shlex.quote(message_id)} {shlex.quote(attachment_id)}'
-            f' --account {shlex.quote(GOG_ACCOUNT)}'
-            f' --out {shlex.quote(output_path)}'
-        )
-        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable='/bin/bash', env=env)
+        result = _run_gog([
+            'gmail', 'attachment', message_id, attachment_id,
+            '--out', output_path,
+        ], json_output=False)
 
-        if result.returncode == 0 and os.path.exists(output_path):
+        if result and result.returncode == 0 and os.path.exists(output_path):
             return output_path
         else:
-            print(f'  Error downloading: {result.stderr}', file=sys.stderr)
+            print(f'  Error downloading attachment', file=sys.stderr)
             return None
     except Exception as e:
         print(f'  Error downloading attachment: {e}', file=sys.stderr)

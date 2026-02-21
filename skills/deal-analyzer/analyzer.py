@@ -78,7 +78,7 @@ def call_claude(prompt, system_prompt="", model="claude-sonnet-4-20250514", max_
             time.sleep(wait)
             continue
 
-        print(f"  Claude API error: {response.status_code} {response.text[:200]}", file=sys.stderr)
+        print(f"  Claude API error: HTTP {response.status_code}", file=sys.stderr)
         return f"Analysis failed — API error ({response.status_code})."
 
     return "Analysis failed — rate limit exceeded after retries."
@@ -179,7 +179,7 @@ def get_google_access_token():
             capture_output=True, text=True, timeout=15
         )
         if result.returncode != 0:
-            print(f"  gog token export failed: {result.stderr.strip()[:200]}", file=sys.stderr)
+            print(f"  gog token export failed", file=sys.stderr)
             return None
 
         token_data = json.load(open(token_path))
@@ -199,7 +199,7 @@ def get_google_access_token():
     if response.status_code == 200:
         return response.json()['access_token']
 
-    print(f"  Token exchange failed: {response.status_code} {response.text[:200]}", file=sys.stderr)
+    print(f"  Token exchange failed: HTTP {response.status_code}", file=sys.stderr)
     return None
 
 
@@ -373,7 +373,7 @@ def create_google_doc(deck_data, section_results):
         )
 
         if resp.status_code not in (200, 201):
-            print(f"  Drive upload failed: {resp.status_code} {resp.text[:200]}", file=sys.stderr)
+            print(f"  Drive upload failed: HTTP {resp.status_code}", file=sys.stderr)
             return (None, None)
 
         doc_id = resp.json()['id']
@@ -597,7 +597,7 @@ def _read_local_file(path):
             )
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout
-            print(f"  pdftotext failed: {result.stderr.strip()[:200]}", file=sys.stderr)
+            print(f"  pdftotext failed", file=sys.stderr)
             return None
         else:
             with open(path, 'r', errors='ignore') as f:

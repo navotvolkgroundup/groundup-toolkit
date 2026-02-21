@@ -31,18 +31,30 @@ for m in config.team_members:
 # Reverse lookup: phone -> email
 PHONE_TO_EMAIL = {member['phone']: email for email, member in TEAM_MEMBERS.items()}
 
-def run_gog_command(cmd):
+def _gog_env():
     env = os.environ.copy()
     env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-    full_cmd = f'source ~/.profile && gog {cmd} --account {shlex.quote(GOG_ACCOUNT)} --json'
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash", env=env)
+    return env
+
+def _run_gog(args, json_output=True):
+    """Run a gog command safely without shell."""
+    cmd = ['gog'] + args + ['--account', GOG_ACCOUNT]
+    if json_output:
+        cmd.append('--json')
+    result = subprocess.run(cmd, capture_output=True, text=True, env=_gog_env())
     if result.returncode != 0:
-        print(f"Error running gog: {result.stderr}", file=sys.stderr)
+        print(f"Error running gog: {result.stderr[:200]}", file=sys.stderr)
         return None
-    try:
-        return json.loads(result.stdout)
-    except Exception:
-        return result.stdout
+    if json_output:
+        try:
+            return json.loads(result.stdout)
+        except Exception:
+            return result.stdout
+    return result
+
+def run_gog_command(cmd):
+    args = shlex.split(cmd)
+    return _run_gog(args)
 
 def get_current_status(email):
     """Read current opt-in status from script"""
@@ -93,17 +105,13 @@ def send_email(to_email, subject, body):
     try:
         with os.fdopen(fd, 'w') as f:
             f.write(body)
-        env = os.environ.copy()
-        env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-        full_cmd = (
-            f'source ~/.profile && gog gmail send'
-            f' --to {shlex.quote(to_email)}'
-            f' --subject {shlex.quote(subject)}'
-            f' --body-file {shlex.quote(body_path)}'
-            f' --account {shlex.quote(GOG_ACCOUNT)}'
-        )
-        result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash", env=env)
-        return result.returncode == 0
+        result = _run_gog([
+            'gmail', 'send',
+            '--to', to_email,
+            '--subject', subject,
+            '--body-file', body_path,
+        ], json_output=False)
+        return result is not None and result.returncode == 0
     finally:
         try:
             os.unlink(body_path)
@@ -112,15 +120,11 @@ def send_email(to_email, subject, body):
 
 def mark_email_processed(thread_id):
     """Mark email as processed"""
-    env = os.environ.copy()
-    env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-    full_cmd = (
-        f'source ~/.profile && gog gmail thread modify {shlex.quote(thread_id)}'
-        f' --account {shlex.quote(GOG_ACCOUNT)}'
-        f' --add {shlex.quote(PROCESSED_LABEL)} --remove UNREAD,INBOX --force'
-    )
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable="/bin/bash", env=env)
-    return result.returncode == 0
+    result = _run_gog([
+        'gmail', 'thread', 'modify', thread_id,
+        '--add', PROCESSED_LABEL, '--remove', 'UNREAD,INBOX', '--force',
+    ], json_output=False)
+    return result is not None and result.returncode == 0
 
 def check_whatsapp_messages():
     """Check for WhatsApp opt-in/opt-out messages"""
