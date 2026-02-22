@@ -5,9 +5,13 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Load env vars from toolkit .env if available
+# Safe .env loading (line-by-line, no shell execution)
 if [ -f "$TOOLKIT_ROOT/.env" ]; then
-    set -a; source "$TOOLKIT_ROOT/.env" 2>/dev/null; set +a
+    while IFS='=' read -r key value; do
+        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+        key=$(echo "$key" | xargs)
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] && export "$key=$value"
+    done < "$TOOLKIT_ROOT/.env" 2>/dev/null || true
 fi
 
 PHONE="$1"

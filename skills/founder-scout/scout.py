@@ -56,15 +56,17 @@ os.makedirs(_DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(_DATA_DIR, 'founder-scout.db')
 LOCK_PATH = os.path.join(_DATA_DIR, 'founder-scout.lock')
 
-# Email recipients for scout reports
+# Email recipients for scout reports (from config.yaml founder_scout.recipient_emails)
+_SCOUT_EMAILS = set(config._data.get('founder_scout', {}).get('recipient_emails', []))
 SCOUT_RECIPIENTS = []
 for m in config.team_members:
-    SCOUT_RECIPIENTS.append({
-        'name': m['name'],
-        'first_name': m['name'].split()[0],
-        'email': m['email'],
-        'phone': m['phone'],
-    })
+    if m['email'] in _SCOUT_EMAILS:
+        SCOUT_RECIPIENTS.append({
+            'name': m['name'],
+            'first_name': m['name'].split()[0],
+            'email': m['email'],
+            'phone': m['phone'],
+        })
 
 # --- LinkedIn Search Queries ---
 

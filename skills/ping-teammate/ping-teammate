@@ -4,7 +4,12 @@
 # Example: ping-teammate Alice +15551234567
 
 set -euo pipefail
-source "$HOME/.env" 2>/dev/null || true
+# Safe .env loading (line-by-line, no shell execution)
+while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+    key=$(echo "$key" | xargs)
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] && export "$key=$value"
+done < "$HOME/.env" 2>/dev/null || true
 
 # --- Team phone mappings ---
 # TODO: Populate from config.yaml - see config.example.yaml for format

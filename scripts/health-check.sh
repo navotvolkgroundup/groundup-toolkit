@@ -23,8 +23,9 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 TIMESTAMP=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 ALERT_EMAIL="${ALERT_EMAIL:-admin@yourcompany.com}"
 GOG_ACCOUNT="${GOG_ACCOUNT:-assistant@yourcompany.com}"
-ALERT_STATE_DIR="/tmp/openclaw-health-alerts"
+ALERT_STATE_DIR="$HOME/.groundup-toolkit/state/health-alerts"
 mkdir -p "$ALERT_STATE_DIR"
+chmod 700 "$HOME/.groundup-toolkit/state" 2>/dev/null || true
 FAILURES=0
 WARNINGS=0
 

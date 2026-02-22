@@ -36,8 +36,10 @@ BRAVE_SEARCH_API_KEY = config.brave_search_api_key
 MATON_API_KEY = config.maton_api_key
 MATON_BASE_URL = "https://gateway.maton.ai/hubspot/crm/v3/objects"
 GOG_ACCOUNT = config.assistant_email
-STATE_FILE = "/tmp/deal-analyzer-state.json"
-DEMO_STATE_FILE = "/tmp/deal-analyzer-demo.json"
+_STATE_DIR = os.path.expanduser("~/.groundup-toolkit/state")
+os.makedirs(_STATE_DIR, mode=0o700, exist_ok=True)
+STATE_FILE = os.path.join(_STATE_DIR, "deal-analyzer-state.json")
+DEMO_STATE_FILE = os.path.join(_STATE_DIR, "deal-analyzer-demo.json")
 
 # --- Core API Functions ---
 
@@ -160,13 +162,14 @@ def send_email(to_email, subject, body):
 
 # --- Google Docs ---
 
-GOG_CREDENTIALS_PATH = "/root/.config/gogcli/credentials.json"
+GOG_CREDENTIALS_PATH = os.path.expanduser("~/.config/gogcli/credentials.json")
 
 
 def get_google_access_token():
     """Get a Google OAuth2 access token using gog's stored credentials."""
     try:
-        creds = json.load(open(GOG_CREDENTIALS_PATH))
+        with open(GOG_CREDENTIALS_PATH) as f:
+            creds = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         print(f"  Could not read gog credentials: {e}", file=sys.stderr)
         return None
@@ -544,45 +547,7 @@ DROPBOX_PATTERN = re.compile(r'https://www\.dropbox\.com/[^\s<>"]+')
 PAPERMARK_PATTERN = re.compile(r'https://(?:www\.)?papermark\.com/view/[^\s<>"]+')
 PITCH_PATTERN = re.compile(r'https://(?:www\.)?pitch\.com/[^\s<>"]+')
 
-# Allowed URL domains for deck fetching (SSRF protection)
-ALLOWED_DECK_DOMAINS = {
-    'docsend.com', 'docs.google.com', 'drive.google.com',
-    'www.dropbox.com', 'dropbox.com', 'papermark.com', 'www.papermark.com',
-    'pitch.com', 'www.pitch.com', 'slides.com', 'www.slides.com',
-    'canva.com', 'www.canva.com',
-}
-
-
-def is_safe_url(url):
-    """Validate URL against allowed domains to prevent SSRF."""
-    import ipaddress
-    import socket
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        if parsed.scheme not in ('http', 'https'):
-            return False
-        hostname = parsed.hostname or ''
-        if not hostname:
-            return False
-
-        # Check hostname against allowed domains first
-        if not any(hostname == d or hostname.endswith('.' + d) for d in ALLOWED_DECK_DOMAINS):
-            return False
-
-        # Resolve hostname and verify all IPs are public (prevents DNS rebinding)
-        try:
-            addrinfos = socket.getaddrinfo(hostname, None)
-            for family, _, _, _, sockaddr in addrinfos:
-                ip = ipaddress.ip_address(sockaddr[0])
-                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-                    return False
-        except (socket.gaierror, ValueError):
-            return False
-
-        return True
-    except Exception:
-        return False
+from lib.safe_url import is_safe_url, safe_request, ALLOWED_DECK_DOMAINS
 
 
 def extract_deck_links(text):
@@ -592,30 +557,29 @@ def extract_deck_links(text):
     return list(dict.fromkeys(links))
 
 
+ALLOWED_LOCAL_DIRS = [
+    os.path.expanduser("~/decks"),
+    "/tmp/openclaw",
+    os.path.expanduser("~/.groundup-toolkit/state"),
+]
+
+
 def fetch_deck_content(source, sender_email=None):
     """Fetch deck content from a URL or local file path (PDF, TXT, etc.)."""
     # Local file path
     if source.startswith('/') or source.startswith('./'):
         return _read_local_file(source)
 
-    # URL
-    if not is_safe_url(source):
-        print(f"  Security: blocked request to disallowed URL: {source}", file=sys.stderr)
-        return None
+    # URL — use safe_request for SSRF-safe multi-hop redirect following
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
         }
         if 'docsend.com' in source and sender_email:
             headers['Cookie'] = f'email={sender_email}'
-        response = requests.get(source, headers=headers, timeout=30, allow_redirects=False)
-        # Check redirect doesn't point to internal host
-        if response.status_code in (301, 302, 303, 307, 308):
-            redirect_url = response.headers.get('Location', '')
-            if not is_safe_url(redirect_url):
-                print(f"  Security: blocked redirect to disallowed URL: {redirect_url}", file=sys.stderr)
-                return None
-            response = requests.get(redirect_url, headers=headers, timeout=30, allow_redirects=False)
+        response = safe_request(source, headers=headers, timeout=30)
+        if response is None:
+            return None
         if response.status_code == 200:
             return response.text
         print(f"  Fetch failed: HTTP {response.status_code} for {source}", file=sys.stderr)
@@ -626,8 +590,18 @@ def fetch_deck_content(source, sender_email=None):
 
 
 def _read_local_file(path):
-    """Read a local file. Converts PDFs to text via pdftotext."""
-    if not os.path.exists(path):
+    """Read a local file. Restricted to allowed directories. Converts PDFs to text via pdftotext."""
+    real_path = os.path.realpath(path)
+    allowed = False
+    for allowed_dir in ALLOWED_LOCAL_DIRS:
+        real_dir = os.path.realpath(allowed_dir)
+        if real_path.startswith(real_dir + os.sep) or real_path == real_dir:
+            allowed = True
+            break
+    if not allowed:
+        print(f"  Security: blocked read outside allowed directories: {path}", file=sys.stderr)
+        return None
+    if not os.path.exists(real_path):
         print(f"  File not found: {path}", file=sys.stderr)
         return None
     try:

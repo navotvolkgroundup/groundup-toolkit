@@ -28,14 +28,14 @@ TEAM_MEMBERS = {m['email']: m['name'].split()[0] for m in config.team_members}
 
 def run_gog_command(cmd):
     """Run gog command with authentication"""
-    full_cmd = f'gog {cmd} --account {shlex.quote(GOG_ACCOUNT)} --json'
-    result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, executable='/bin/bash')
+    cmd_list = ['gog'] + shlex.split(cmd) + ['--account', GOG_ACCOUNT, '--json']
+    result = subprocess.run(cmd_list, capture_output=True, text=True)
     if result.returncode != 0:
         print(f'Error running gog: {result.stderr}')
         return None
     try:
         return json.loads(result.stdout)
-    except:
+    except Exception:
         return result.stdout
 
 def load_processed_meetings():
@@ -63,8 +63,9 @@ def save_processed_meeting(meeting_id, info):
     try:
         with os.fdopen(fd, 'w') as f:
             json.dump(processed, f, indent=2)
+        os.chmod(tmp_path, 0o600)
         os.replace(tmp_path, PROCESSED_MEETINGS_FILE)
-    except:
+    except Exception:
         os.unlink(tmp_path)
         raise
 
@@ -143,8 +144,8 @@ def get_transcript_from_recording(recording_id, recording_name):
     transcript_path = f'/tmp/transcript-{transcript_file["id"]}.txt'
     
     try:
-        download_cmd = f'gog drive download {shlex.quote(transcript_file["id"])} --out {shlex.quote(transcript_path)} --account {shlex.quote(GOG_ACCOUNT)}'
-        result = subprocess.run(download_cmd, shell=True, capture_output=True, text=True, executable='/bin/bash', timeout=120)
+        download_cmd = ['gog', 'drive', 'download', transcript_file['id'], '--out', transcript_path, '--account', GOG_ACCOUNT]
+        result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=120)
         
         if result.returncode != 0:
             print(f'  ❌ Download failed: {result.stderr}')
@@ -251,15 +252,10 @@ Processed by {config.assistant_name}'s Meeting Bot
         with os.fdopen(body_fd, 'w') as f:
             f.write(body)
 
-        cmd = (
-            f'gog gmail send'
-            f' --to {shlex.quote(admin_email)}'
-            f' --subject {shlex.quote(subject)}'
-            f' --body-file {shlex.quote(body_path)}'
-            f' --account {shlex.quote(GOG_ACCOUNT)}'
-        )
+        cmd = ['gog', 'gmail', 'send', '--to', admin_email, '--subject', subject,
+               '--body-file', body_path, '--account', GOG_ACCOUNT]
 
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, executable='/bin/bash', timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
         if result.returncode == 0:
             print(f'  ✅ Email sent to {admin_email}')

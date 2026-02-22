@@ -3,10 +3,12 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$SCRIPT_DIR/analyzer.py"
 
-# Load environment variables
-if [ -f "$HOME/.env" ]; then
-    . "$HOME/.env"
-fi
+# Safe .env loading (line-by-line, no shell execution)
+while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+    key=$(echo "$key" | xargs)
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z_0-9]*$ ]] && export "$key=$value"
+done < "$HOME/.env" 2>/dev/null || true
 
 ACTION="${1:-help}"
 shift 2>/dev/null
