@@ -60,3 +60,8 @@ notifications:
 meeting_bot:
   camofox_port: 9377                   # Port for Camoufox headless browser
   google_account: "christina@yourcompany.com"  # Google account for Meet
+
+founder_scout:
+  recipient_emails:                    # Who gets founder scout reports
+    - "alice@yourcompany.com"
+    - "bob@yourcompany.com"

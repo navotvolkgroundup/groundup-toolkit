@@ -11,6 +11,7 @@ can monitor attendance.
 import os
 import sys
 import json
+import fcntl
 import shlex
 import subprocess
 import re
@@ -36,27 +37,50 @@ def load_joined():
         return {}
     try:
         with open(JOINED_FILE) as f:
-            return json.load(f)
+            fcntl.flock(f, fcntl.LOCK_SH)
+            data = json.load(f)
+            fcntl.flock(f, fcntl.LOCK_UN)
+            return data
     except Exception:
         return {}
 
 
 def save_joined(data):
-    with open(JOINED_FILE, "w") as f:
+    fd = os.open(JOINED_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
         json.dump(data, f, indent=2)
+        fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def _load_env():
+    """Safely load .env file without shell execution."""
+    env_path = os.path.expanduser("~/.env")
+    if not os.path.exists(env_path):
+        return
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if line.startswith('export '):
+                line = line[7:]
+            if '=' not in line:
+                continue
+            key, _, val = line.partition('=')
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if re.match(r'^[A-Za-z_][A-Za-z_0-9]*$', key):
+                os.environ.setdefault(key, val)
 
 
 def get_upcoming_meetings():
     """Get meetings starting in the next 5 minutes"""
-    cmd = (
-        f'source "$HOME/.env" && '
-        f'gog calendar events --today '
-        f'--account {shlex.quote(GOG_ACCOUNT)} --json'
-    )
+    _load_env()
+    cmd = ['gog', 'calendar', 'events', '--today', '--account', GOG_ACCOUNT, '--json']
     try:
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True,
-            executable="/bin/bash", timeout=30,
+            cmd, capture_output=True, text=True, timeout=30,
         )
         if result.returncode != 0:
             log(f"gog error: {result.stderr.strip()}")
@@ -142,8 +166,11 @@ def write_meeting_metadata(event, meet_url):
         "attendees": attendees,
     }
 
-    meta_path = f"/tmp/meeting-meta-{event_id}.json"
-    with open(meta_path, "w") as f:
+    state_dir = os.path.expanduser("~/.groundup-toolkit/state")
+    os.makedirs(state_dir, mode=0o700, exist_ok=True)
+    meta_path = os.path.join(state_dir, f"meeting-meta-{event_id}.json")
+    fd = os.open(meta_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(meta, f, indent=2)
 
     return meta_path

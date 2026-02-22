@@ -6,48 +6,15 @@ import os
 import re
 import sys
 import json
-import socket
-import ipaddress
 import requests
 import subprocess
 from datetime import datetime
-from urllib.parse import urlparse
+
+# Add toolkit root to path for lib imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from lib.safe_url import is_safe_url, safe_request, ALLOWED_DECK_DOMAINS
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY')
-
-ALLOWED_DECK_DOMAINS = {
-    'docsend.com', 'docs.google.com', 'drive.google.com',
-    'www.dropbox.com', 'dropbox.com', 'papermark.com', 'www.papermark.com',
-    'pitch.com', 'www.pitch.com',
-}
-
-
-def is_safe_url(url):
-    """Validate URL against allowed domains to prevent SSRF."""
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ('http', 'https'):
-            return False
-        hostname = parsed.hostname or ''
-        if not hostname:
-            return False
-
-        if not any(hostname == d or hostname.endswith('.' + d) for d in ALLOWED_DECK_DOMAINS):
-            return False
-
-        # Resolve hostname and verify all IPs are public (prevents DNS rebinding)
-        try:
-            addrinfos = socket.getaddrinfo(hostname, None)
-            for family, _, _, _, sockaddr in addrinfos:
-                ip = ipaddress.ip_address(sockaddr[0])
-                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-                    return False
-        except (socket.gaierror, ValueError):
-            return False
-
-        return True
-    except Exception:
-        return False
 
 
 def extract_deck_links(text):

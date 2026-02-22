@@ -27,7 +27,9 @@ ASSISTANT_PHONE="${ASSISTANT_WHATSAPP_PHONE:-+1234567890}"
 ALERT_PHONE="${ALERT_PHONE:-+1234567890}"
 ALERT_EMAIL="${ALERT_EMAIL:-admin@yourcompany.com}"
 GOG_ACCOUNT="${GOG_ACCOUNT:-assistant@yourcompany.com}"
-STATE_FILE="/tmp/whatsapp-watchdog-state"
+_WATCHDOG_STATE_DIR="$HOME/.groundup-toolkit/state"
+mkdir -p "$_WATCHDOG_STATE_DIR" 2>/dev/null && chmod 700 "$_WATCHDOG_STATE_DIR" 2>/dev/null || true
+STATE_FILE="$_WATCHDOG_STATE_DIR/whatsapp-watchdog-state"
 LOG_PREFIX="[$TIMESTAMP] WhatsApp Watchdog:"
 
 log()  { echo "$LOG_PREFIX $1"; }
@@ -79,8 +81,11 @@ send_alert() {
 
         # Write Twilio credentials to a temp netrc file so they don't appear
         # in shell command strings, ps output, or log files.
+        _old_umask=$(umask)
+        umask 077
         _twilio_netrc=$(mktemp /tmp/.twilio-netrc.XXXXXX)
-        chmod 600 "$_twilio_netrc"
+        umask "$_old_umask"
+        trap 'rm -f "$_twilio_netrc"' EXIT
         printf 'machine api.twilio.com\n  login %s\n  password %s\n' \
             "$TWILIO_API_KEY_SID" "$TWILIO_API_KEY_SECRET" > "$_twilio_netrc"
 
@@ -91,6 +96,7 @@ send_alert() {
             --data-urlencode "Twiml=$twiml" > /dev/null 2>&1
 
         rm -f "$_twilio_netrc"
+        trap - EXIT
     fi
 
     # Also send email alert (GOG_KEYRING_PASSWORD is already in env from .env source)
