@@ -37,6 +37,7 @@ MATON_API_KEY = config.maton_api_key
 MATON_BASE_URL = "https://gateway.maton.ai/hubspot/crm/v3/objects"
 GOG_ACCOUNT = config.assistant_email
 STATE_FILE = "/tmp/deal-analyzer-state.json"
+DEMO_STATE_FILE = "/tmp/deal-analyzer-demo.json"
 
 # --- Core API Functions ---
 
@@ -436,6 +437,46 @@ def load_state():
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return None
+
+
+# --- Demo State ---
+
+
+def save_demo_state(phone, email=None, phase="konko"):
+    """Activate demo mode."""
+    state = {"active": True, "phone": phone, "email": email, "phase": phase, "started": datetime.now().isoformat()}
+    fd, tmp = tempfile.mkstemp(suffix='.json', prefix='demo-state-', dir='/tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(state, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, DEMO_STATE_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def load_demo_state():
+    """Check if demo mode is active. Returns state dict or None."""
+    try:
+        with open(DEMO_STATE_FILE) as f:
+            state = json.load(f)
+        if state.get("active"):
+            return state
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def clear_demo_state():
+    """Deactivate demo mode."""
+    try:
+        os.unlink(DEMO_STATE_FILE)
+    except FileNotFoundError:
+        pass
 
 
 # --- HubSpot Integration ---
@@ -1364,12 +1405,83 @@ def deliver_results(deck_data, section_results, phone, email=None):
     # Ask about HubSpot
     send_whatsapp(phone, f"Want me to log this analysis to HubSpot under *{company}*? Just reply 'log to hubspot'.")
 
+    # Tell agent everything was already delivered
+    print(f"DELIVERED: Full evaluation for {company} sent to WhatsApp and email. Do not send any additional messages or emails.")
+
 
 # --- Entry Points ---
 
 
 def quick_analyze(deck_url, phone, sender_email=None):
     """Quick extraction — sends summary via WhatsApp and asks about full report."""
+    # Demo mode — use pre-cached data instead of real fetch
+    demo = load_demo_state()
+    if demo:
+        demo_phone = demo.get("phone") or phone
+        phase = demo.get("phase", "konko")
+
+        if phase == "konko":
+            deck_data = DEMO_DECK_DATA
+            company_name = "Konko AI"
+            domain = "konko.ai"
+            industry = "HOSPITAL_HEALTH_CARE"
+            deal_name = "Konko AI — Seed"
+            amount = 4000000
+        else:
+            deck_data = DEMO_NOOVOX_DECK_DATA
+            company_name = "Noovox"
+            domain = "noovox.com"
+            industry = "COMPUTER_SOFTWARE"
+            deal_name = "Noovox — Seed"
+            amount = 2000000
+
+        # Create HubSpot company + deal
+        company_id = hubspot_search_company(company_name)
+        if not company_id:
+            company_id = hubspot_create_company(company_name, domain=domain, industry=industry)
+        if company_id:
+            hubspot_create_deal(deal_name, stage="qualifiedtobuy", company_id=company_id, amount=amount)
+
+        save_state(deck_data)
+
+        # Send directly via WhatsApp with formatted summary
+        if phase == "konko":
+            summary = """*Product:* AI-powered patient coordinator (Kora) that automates appointment booking via WhatsApp for LATAM clinics
+
+*Problem:* 95% of clinic scheduling in Latin America is still manual. Doctors waste 40% of their time on admin
+
+*Traction:* $0 → $520K ARR in 9 months, 2x QoQ growth, 53 customers, 500K+ patient interactions
+
+*Team:* Jean Marc Goguikian (CEO) — BCG, Harvard MBA, clinic owner who 3x'd his own bookings. Michael Haddad (CTO) — C3.ai, Tesla, Harvard MBA
+
+*Fundraising:* $4M seed round (+$1.1M prior). 18-month runway targeting $5M ARR
+
+*Business Model:* SaaS — $795/month per clinic, 30% revenue uplift for clients within 60 days"""
+        else:
+            summary = """*Product:* First OS for executive-led growth — orchestrate, govern, and measure executives' thought leadership at scale
+
+*Problem:* 95% of hidden buyers say thought leadership makes them receptive to sales, but 71% never interact with sales. Companies lack tools to scale executive content
+
+*Traction:* $20K ARR in first month, 13 enterprise customers (12-month commitments), 100+ waitlist
+
+*Team:* Andres Prilloltensky (CEO), balanced team with CPO, CTO, marketing, and AI leads. Israel-based, US/EU GTM
+
+*Fundraising:* Raising $2M seed. Target: 15-18 months to $1.6M ARR and 120+ paying companies
+
+*Business Model:* SaaS — $50/month/user ($250/month for 5 users), enterprise 12-month commitments"""
+
+        send_whatsapp(demo_phone, f"""Done! Created *{company_name}* in HubSpot.
+
+*Quick Summary: {company_name}*
+
+{summary}
+
+---
+Want the full 12-section investment report?""")
+        # Tell agent messages were already sent
+        print("DELIVERED: Quick summary sent to WhatsApp and HubSpot records created. Do not send any additional messages.")
+        return deck_data
+
     print(f"Quick analysis: {deck_url}")
 
     content = fetch_deck_content(deck_url, sender_email)
@@ -1485,6 +1597,18 @@ def log_to_hubspot(phone):
 
 def full_report(phone, email=None):
     """Run full 12-section evaluation from saved state (no URL needed)."""
+    # Check demo mode — use pre-cached data instead of real analysis
+    demo = load_demo_state()
+    if demo:
+        phase = demo.get("phase", "konko")
+        demo_phone = demo.get("phone") or phone
+        demo_email = demo.get("email") or email
+        if phase == "konko":
+            demo_report(demo_phone, demo_email)
+        else:
+            demo_report_noovox(demo_phone, demo_email)
+        return
+
     state = load_state()
     if not state or not state.get('deck_data', {}).get('company_name'):
         send_whatsapp(phone, "No recent deck analysis found. Send a deck link first.")
@@ -1520,6 +1644,316 @@ def full_report(phone, email=None):
 
     elapsed = time.time() - start_time
     print(f"  Done in {elapsed:.0f}s — {company} full report complete")
+
+
+# --- Demo Mode (LP Meeting) ---
+
+DEMO_DECK_DATA = {
+    "company_name": "Konko AI",
+    "product_overview": "AI-powered patient coordinator (Kora) that automates appointment booking and healthcare administration through WhatsApp for Latin American clinics.",
+    "problem_solution": "95% of clinic scheduling in Latin America is still manual via WhatsApp, and doctors waste 40% of their time on admin. Konko's AI agent Kora automates patient conversations, appointment scheduling, and info gathering directly through WhatsApp — achieving 67% full automation and delivering 30% revenue uplift within 60 days.",
+    "key_capabilities": "WhatsApp-native AI patient coordinator, event-driven multi-agent architecture, 67% full automation rate, <1 hour setup, 34-second average first response time, handles scheduling intent detection, info gathering, and appointment booking",
+    "team_background": "Jean Marc Goguikian (CEO) — BCG consultant, Harvard MBA, clinic owner who tripled his own clinic's bookings using AI. Michael Haddad (CTO) — enterprise AI experience from C3.ai and Tesla, Harvard MBA.",
+    "gtm_strategy": "Founder-led sales targeting Latin American private clinics. Started with small/mid-sized clinics at $795/month. Expanding to large clinic networks. WhatsApp-first approach matches regional communication patterns (85%+ WhatsApp penetration in LATAM).",
+    "traction": "$0 to $520K ARR in 9 months, 2x quarter-over-quarter growth, 53 customers, 500K+ patient interactions, 30% revenue uplift for clients within 60 days, 2-month payback period",
+    "fundraising": "Raising $4M seed round (plus prior $1.1M). 18-month runway targeting $5M ARR.",
+    "industry": "Healthtech / Healthcare AI",
+    "competitors_mentioned": ["Assort", "Tennr", "Freed"],
+    "founder_names": ["Jean Marc Goguikian", "Michael Haddad"],
+    "location": "Latin America",
+    "business_model": "SaaS — $795/month per clinic, with potential for higher ARPU on larger practices",
+    "target_customers": "Private clinics and medical practices in Latin America (small, mid-sized, and large)"
+}
+
+DEMO_GOOGLE_DOC_URL = "https://docs.google.com/document/d/1qRucJuK9DRVyDqHXpcpMPIXRwSBl-zDjOHVtALqsJZM/edit"
+
+DEMO_TLDR = (
+    "Konko AI builds an AI-powered patient coordinator that automates appointment booking and "
+    "healthcare administration through WhatsApp for Latin American clinics, addressing a $150B regional "
+    "market where 95% of scheduling remains manual. The company grew from $0 to $520K ARR in just 9 months "
+    "with 2x quarter-over-quarter growth across 53 customers and 500K+ patient interactions, delivering "
+    "30% revenue uplift to clients within 60 days. Recommendation: STRONG INVEST — perfect market timing, "
+    "world-class founders with domain expertise (CEO tripled his own clinic's bookings), and an 18-24 month "
+    "competitive window in an underserved market."
+)
+
+DEMO_HUBSPOT_NOTE = f"""DEAL EVALUATION: Konko AI (AI-Generated, {datetime.now().strftime('%b %d %Y')})
+
+Full report: {DEMO_GOOGLE_DOC_URL}
+
+TL;DR: {DEMO_TLDR}
+
+## Investment Memo Summary
+
+### Executive Summary
+Latin America's healthcare system spends $150B annually on administration, with 95% of appointments still booked manually via WhatsApp. Doctors waste 40% of their time on admin tasks. Konko AI's Kora platform automates patient coordination directly through WhatsApp, achieving 67% full automation and 30% revenue uplift for clinics within 60 days.
+
+The founding team combines exceptional domain expertise — CEO Jean Marc Goguikian (BCG, Harvard MBA) tripled his own clinic's bookings using AI, while CTO Michael Haddad brings enterprise AI experience from C3.ai and Tesla. Their event-driven multi-agent architecture configures in under an hour.
+
+Perfect market timing: generative AI reaching production readiness, WhatsApp Business API maturing, and post-COVID healthcare digitization accelerating. $0 to $520K ARR in 9 months with 2x QoQ growth across 53 customers and 500K+ patient interactions.
+
+### Investment Recommendation
+**Recommendation**: STRONG INVEST
+**Conviction Level**: High
+**Rationale**: Exceptional early traction validates strong product-market fit in a massive underserved market, with world-class founders executing flawlessly during the optimal timing window for healthcare AI adoption.
+
+### Key Strengths
+1. Exceptional traction velocity — $0 to $520K ARR in 9 months with 2x QoQ growth
+2. Unique positioning — only player targeting LATAM clinics with WhatsApp-native AI coordination
+3. Compelling value prop — 30% revenue uplift and 2-month payback period
+4. Strong founding team — domain expertise (clinic owner) + enterprise AI (C3.ai, Tesla) + Harvard MBAs
+5. Large underserved market — $150B admin spend with 95% manual processes
+
+### Key Risks
+1. Platform dependency — heavy reliance on WhatsApp Business API (Meta could change terms)
+2. Geographic concentration — economically volatile Latin American markets, currency risk
+3. Competitive moat — basic chatbot competitors could emerge, though 67% automation rate provides defensibility
+4. Scaling challenges — founder-led sales model may create bottlenecks
+5. Regulatory uncertainty — healthcare AI regulation varies by country in LATAM"""
+
+
+DEMO_NOOVOX_DECK_DATA = {
+    "company_name": "Noovox",
+    "product_overview": "The first operating system purpose-built for executive-led growth — an end-to-end platform to orchestrate, govern, and measure the impact of executives' thought leadership content.",
+    "problem_solution": "B2B playbook is broken: 95% of hidden buyers say thought leadership makes them more receptive to sales, but 71% never interact with sales. Companies want executive-led growth but face workflow bottlenecks, generic content, and brand/compliance risk. Noovox provides AI-powered executive workspace + org control center to orchestrate authentic thought leadership at scale.",
+    "key_capabilities": "AI ideation & content creation, authentic voice personalization, multi-executive orchestration, brand & risk management, team enablement & advocacy, engagement & network insights, performance analytics, multi-agent infrastructure with proprietary executive voice models",
+    "team_background": "Andres Prilloltensky (CEO) — experienced founder. Balanced founding team including CPO (Eran Ben Yehoshua), CTO (Uri Cusnir), Marketing Strategist (Yael Klass), B2B Marketing Executive (Nira Frenkel), AI & Data Lead (Aviv Peleg), plus 3 additional team members.",
+    "gtm_strategy": "Direct enterprise sales targeting B2B companies in North America and EMEA. Waitlist-driven launch strategy. Phase 1 (now): secure wedge with V2 personalization engine and early monetization. Phase 2 (Q3/26): CRM/Slack integrations, full monetization. Phase 3 (Q4/26+): social listening, cross-platform support.",
+    "traction": "$20K ARR within first month of monetization, 13 paying enterprise customers on 12-month commitments, 100+ companies on waitlist, 8-10 paying executives on individual plans",
+    "fundraising": "Raising $2M seed round. Target dilution: 15-20%. Min checks: $500K for funds, $100K for angels. 15-18 months to $1.6M ARR and 120+ paying companies.",
+    "industry": "SaaS / B2B Marketing Technology / Executive Growth Platform",
+    "competitors_mentioned": ["Hootsuite", "Sprout Social", "Jasper", "Copy.ai", "LinkedIn native tools"],
+    "founder_names": ["Andres Prilloltensky"],
+    "location": "Israel (HQ), US/EU GTM focus",
+    "business_model": "SaaS subscription — $50/month/user ($250/month for 5 users), enterprise customers on 12-month commitments",
+    "target_customers": "B2B companies with 100+ employees, marketing and communications teams, enterprises needing multi-executive thought leadership"
+}
+
+DEMO_NOOVOX_GOOGLE_DOC_URL = "https://docs.google.com/document/d/1qRucJuK9DRVyDqHXpcpMPIXRwSBl-zDjOHVtALqsJZM/edit"
+
+DEMO_NOOVOX_TLDR = (
+    "Noovox is building the first OS for executive-led growth — a SaaS platform helping B2B companies "
+    "orchestrate, govern, and measure executive thought leadership at scale. Early traction ($20K ARR, "
+    "13 enterprise customers, 100+ waitlist) shows initial interest but remains very early-stage. "
+    "The TAM ($180-360M) is narrow for venture scale without significant category expansion, the founding "
+    "team lacks proven startup exits, and $20K ARR after months of selling signals slow adoption. "
+    "The executive-led growth category is unproven and may remain a feature rather than a standalone platform. "
+    "Recommendation: PASS — revisit at Series A if they demonstrate stronger growth velocity and TAM expansion."
+)
+
+DEMO_NOOVOX_HUBSPOT_NOTE = f"""DEAL EVALUATION: Noovox (AI-Generated, {datetime.now().strftime('%b %d %Y')})
+
+Full report: {DEMO_NOOVOX_GOOGLE_DOC_URL}
+
+TL;DR: {DEMO_NOOVOX_TLDR}
+
+## Investment Memo Summary
+
+### Executive Summary
+Noovox is building the first operating system for executive-led growth, enabling B2B companies to orchestrate and measure their executives' thought leadership at scale. The platform combines an AI-powered executive workspace with an organizational control center for governance and analytics.
+
+The team is Israel-based with a balanced mix of product, engineering, marketing, and AI expertise, led by CEO Andres Prilloltensky. They've secured 13 enterprise customers on 12-month commitments and have 100+ companies on their waitlist, but revenue remains very early at $20K ARR.
+
+### Investment Recommendation
+**Recommendation**: PASS
+**Conviction Level**: Medium
+**Rationale**: While the vision of systematizing executive-led growth is compelling, the narrow TAM, early-stage traction, and unproven category make this too risky at the current valuation. The $20K ARR after active selling suggests product-market fit is not yet established.
+
+### Key Concerns
+1. Narrow TAM — $180-360M addressable market is small for venture-scale returns without major category expansion
+2. Very early traction — $20K ARR with 13 customers doesn't yet validate willingness to pay at scale
+3. Unproven category — "executive-led growth" may remain a feature within existing marketing suites rather than a standalone platform
+4. Competitive risk — LinkedIn, Hootsuite, and AI content tools could add similar features as product extensions
+5. Founding team — no prior exits or proven startup track record at scale
+
+### What Would Change Our Mind
+1. Demonstrating $200K+ ARR with clear month-over-month growth acceleration
+2. Evidence that the category is real — multiple funded startups or enterprise budget line items for executive-led growth
+3. Expansion into adjacent use cases that significantly increase TAM
+4. Strategic partnerships that validate the platform approach over point solutions"""
+
+
+def hubspot_create_company(name, domain=None, industry=None):
+    """Create a company in HubSpot. Returns company ID or None."""
+    if not MATON_API_KEY:
+        return None
+    headers = {"Authorization": f"Bearer {MATON_API_KEY}", "Content-Type": "application/json"}
+    properties = {"name": name}
+    if domain:
+        properties["domain"] = domain
+    if industry:
+        properties["industry"] = industry
+    try:
+        response = requests.post(
+            f"{MATON_BASE_URL}/companies",
+            headers=headers,
+            json={"properties": properties},
+            timeout=10,
+        )
+        if response.status_code in (200, 201):
+            return response.json().get('id')
+        print(f"  HubSpot create company failed: HTTP {response.status_code}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"  HubSpot create error: {e}", file=sys.stderr)
+        return None
+
+
+def hubspot_create_deal(deal_name, pipeline="default", stage=None, company_id=None, amount=None):
+    """Create a deal in HubSpot. Returns deal ID or None."""
+    if not MATON_API_KEY:
+        return None
+    headers = {"Authorization": f"Bearer {MATON_API_KEY}", "Content-Type": "application/json"}
+    properties = {"dealname": deal_name, "pipeline": pipeline}
+    if stage:
+        properties["dealstage"] = stage
+    if amount:
+        properties["amount"] = str(amount)
+
+    payload = {"properties": properties}
+    if company_id:
+        payload["associations"] = [{
+            "to": {"id": company_id},
+            "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 5}]
+        }]
+
+    try:
+        response = requests.post(
+            f"{MATON_BASE_URL}/deals",
+            headers=headers,
+            json=payload,
+            timeout=10,
+        )
+        if response.status_code in (200, 201):
+            return response.json().get('id')
+        print(f"  HubSpot create deal failed: HTTP {response.status_code}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"  HubSpot deal error: {e}", file=sys.stderr)
+        return None
+
+
+def run_demo(phone, email=None):
+    """LP demo — arm demo mode. No messages sent. The flow starts when you send a WhatsApp message."""
+    if not phone:
+        print("ERROR: Phone number required for demo")
+        print("Usage: deal-analyzer demo <phone> [email]")
+        sys.exit(1)
+
+    save_demo_state(phone, email, phase="konko")
+    print("Demo mode armed (2 deals: Konko AI → Noovox).")
+    print("  Phase 1: Send a deck URL → Konko AI quick summary → 'full report' → STRONG INVEST")
+    print("  Phase 2: Send another deck URL → Noovox quick summary → 'full report' → PASS")
+    print("  Then 'end demo' to stop.")
+
+
+def demo_report(phone, email=None):
+    """Demo step 2: Send evaluation via WhatsApp, log to HubSpot, send email."""
+    # Progress messages
+    send_whatsapp(phone, "Running deep analysis on *Konko AI*...")
+    time.sleep(5)
+
+    send_whatsapp(phone, "Market, competition, team, and economics done...")
+    time.sleep(5)
+
+    send_whatsapp(phone, "Almost there — finalizing strategy and exit analysis...")
+    time.sleep(5)
+
+    # Send evaluation via WhatsApp
+    send_whatsapp(phone, f"""*Deal Evaluation: Konko AI*
+{datetime.now().strftime('%B %d, %Y')}
+
+*TL;DR:* {DEMO_TLDR}
+
+*Full Report:* {DEMO_GOOGLE_DOC_URL}""")
+
+    # Log to HubSpot
+    company_id = hubspot_search_company("Konko AI")
+    if company_id:
+        hubspot_add_note(company_id, DEMO_HUBSPOT_NOTE)
+
+    send_whatsapp(phone, "Logged deal evaluation for *Konko AI* to HubSpot. \u2713")
+
+    # Send email if provided
+    if email:
+        email_body = f"""Deal Evaluation: Konko AI
+{datetime.now().strftime('%B %d, %Y')}
+
+TL;DR
+{DEMO_TLDR}
+
+Full 12-Section Report
+{DEMO_GOOGLE_DOC_URL}
+
+---
+This analysis was generated by GroundUp's AI deal evaluation system.
+All assessments should be validated through direct founder engagement and independent due diligence."""
+        send_email(email, "Deal Evaluation: Konko AI", email_body)
+
+    # Advance demo to Noovox phase
+    demo = load_demo_state()
+    if demo:
+        save_demo_state(demo["phone"], demo.get("email"), phase="noovox")
+
+    # Tell agent messages were already sent
+    print("DELIVERED: Full evaluation sent to WhatsApp, logged to HubSpot, email sent. Do not send any additional messages.")
+
+
+def demo_report_noovox(phone, email=None):
+    """Demo Noovox evaluation — PASS recommendation."""
+    # Progress messages
+    send_whatsapp(phone, "Running deep analysis on *Noovox*...")
+    time.sleep(5)
+
+    send_whatsapp(phone, "Market, competition, team, and economics done...")
+    time.sleep(5)
+
+    send_whatsapp(phone, "Almost there — finalizing strategy and exit analysis...")
+    time.sleep(5)
+
+    # Send evaluation via WhatsApp
+    send_whatsapp(phone, f"""*Deal Evaluation: Noovox*
+{datetime.now().strftime('%B %d, %Y')}
+
+*TL;DR:* {DEMO_NOOVOX_TLDR}
+
+*Full Report:* {DEMO_NOOVOX_GOOGLE_DOC_URL}""")
+
+    # Log to HubSpot
+    company_id = hubspot_search_company("Noovox")
+    if company_id:
+        hubspot_add_note(company_id, DEMO_NOOVOX_HUBSPOT_NOTE)
+
+    send_whatsapp(phone, "Logged deal evaluation for *Noovox* to HubSpot. \u2713")
+
+    # Send email if provided
+    if email:
+        email_body = f"""Deal Evaluation: Noovox
+{datetime.now().strftime('%B %d, %Y')}
+
+TL;DR
+{DEMO_NOOVOX_TLDR}
+
+Full 12-Section Report
+{DEMO_NOOVOX_GOOGLE_DOC_URL}
+
+---
+This analysis was generated by GroundUp's AI deal evaluation system.
+All assessments should be validated through direct founder engagement and independent due diligence."""
+        send_email(email, "Deal Evaluation: Noovox", email_body)
+
+    # Tell agent messages were already sent
+    print("DELIVERED: Full evaluation sent to WhatsApp, logged to HubSpot, email sent. Do not send any additional messages.")
+
+
+def demo_end():
+    """End demo mode."""
+    demo = load_demo_state()
+    if not demo:
+        print("Demo mode is not active.")
+        return
+    clear_demo_state()
+    print("Demo mode ended.")
 
 
 def test():
@@ -1646,6 +2080,14 @@ def main():
     elif action == 'log':
         phone = sys.argv[2] if len(sys.argv) > 2 else config.alert_phone
         log_to_hubspot(phone)
+
+    elif action == 'demo':
+        phone = sys.argv[2] if len(sys.argv) > 2 else None
+        email = sys.argv[3] if len(sys.argv) > 3 else None
+        run_demo(phone, email)
+
+    elif action == 'end-demo':
+        demo_end()
 
     elif action == 'test':
         test()

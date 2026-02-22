@@ -24,7 +24,10 @@
         "full.*report",
         "log.*hubspot",
         "log.*deal",
-        "log.*analysis"
+        "log.*analysis",
+        "end.*demo",
+        "stop.*demo",
+        "demo.*over"
       ]
     }
   ]

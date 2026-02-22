@@ -7,6 +7,8 @@ actions:
   - analyze
   - evaluate
   - log
+  - demo
+  - end-demo
   - test
 ---
 
@@ -66,6 +68,37 @@ Log the last analysis to HubSpot as a company note.
 deal-analyzer log [phone]
 ```
 
+### demo (LP meeting — one command)
+Activate demo mode with two pre-cached deals: Konko AI (STRONG INVEST) and Noovox (PASS). Run once from console, then the entire flow happens via WhatsApp.
+
+```bash
+deal-analyzer demo <phone> [email]
+```
+
+After activating, the demo has two phases:
+
+**Phase 1 — Konko AI (STRONG INVEST):**
+1. User sends a deck URL → `analyze` uses cached Konko AI data, creates HubSpot records, sends quick summary
+2. User replies "full report" → progress + TL;DR + Google Doc link + auto-logs to HubSpot
+3. After completion, demo automatically advances to Phase 2
+
+**Phase 2 — Noovox (PASS):**
+4. User sends another deck URL (e.g. "David sent me this deck...") → `analyze` uses cached Noovox data, creates HubSpot records, sends quick summary
+5. User replies "full report" → progress + TL;DR (PASS recommendation) + Google Doc link + auto-logs to HubSpot
+6. User replies "end demo" → demo mode deactivated
+
+**IMPORTANT**: When output starts with "DELIVERED:", the skill has already sent messages directly to WhatsApp. Do NOT send any additional messages or summaries — just acknowledge silently or say nothing.
+
+### end-demo
+Deactivate demo mode. Returns to normal deal analysis behavior.
+
+```bash
+deal-analyzer end-demo
+```
+
+**WhatsApp triggers:**
+- "end demo", "stop demo", "demo over" → `end-demo`
+
 ### test
 Run test evaluation with sample deck data (FleetPulse).
 
@@ -103,6 +136,8 @@ Phase 5: DELIVER  (~10s)                   — WhatsApp + email + HubSpot prompt
 - **WhatsApp**: TL;DR + executive summary + investment recommendation
 - **Email**: Full ~15-page investment memo with TL;DR and all 12 sections
 - **HubSpot**: Company note with TL;DR + investment memo (on user confirmation)
+
+**IMPORTANT**: This skill sends WhatsApp messages directly. When the output starts with "DELIVERED:", all messages have already been sent. Do NOT send duplicate messages, summaries, or paraphrased versions. Just acknowledge briefly or say nothing.
 
 ## Configuration
 

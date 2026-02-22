@@ -45,6 +45,16 @@ case "$ACTION" in
         /usr/bin/python3 "$SCRIPT" log "$PHONE"
         ;;
 
+    demo)
+        PHONE="${1:-}"
+        EMAIL="${2:-}"
+        /usr/bin/python3 "$SCRIPT" demo "$PHONE" "$EMAIL"
+        ;;
+
+    end-demo)
+        /usr/bin/python3 "$SCRIPT" end-demo
+        ;;
+
     test)
         /usr/bin/python3 "$SCRIPT" test
         ;;
@@ -59,6 +69,8 @@ case "$ACTION" in
         echo "  evaluate <URL> <PHONE> [EMAIL]   Full 12-section analysis (3-5 min)"
         echo "  full-report [PHONE] [EMAIL]      Full report from last analysis state"
         echo "  log [PHONE]                      Log last analysis to HubSpot"
+        echo "  demo <PHONE> [EMAIL]             Activate LP demo mode"
+        echo "  end-demo                         Deactivate demo mode"
         echo "  test                             Run test with sample data"
         exit 0
         ;;
