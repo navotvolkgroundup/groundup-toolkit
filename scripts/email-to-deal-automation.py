@@ -121,6 +121,13 @@ def extract_company_info(thread):
     # Remove LP mentions from company name
     subject_clean = re.sub(r'\bLP\b|\bL\.P\.\b|limited partner', '', subject_clean, flags=re.IGNORECASE).strip()
 
+    # Strip "from <name> @ <company>" or "from <name> at <company>" sender context
+    # e.g. "Preso from Mike @ Square One Ventures" → "Preso"
+    subject_clean = re.sub(
+        r'\s+from\s+\w[\w\s]*?(?:@|at\s)\s*[\w\s]+$',
+        '', subject_clean, flags=re.IGNORECASE
+    ).strip()
+
     # Handle "Firm x Startup" or "Firm <> Startup" subject patterns
     # Pick the side that isn't our own firm name
     split_match = re.split(r'\s+(?:x|<>|<->|&|and|meets?|intro(?:ducing)?(?:\s*-)?)\s+', subject_clean, flags=re.IGNORECASE)
@@ -131,8 +138,8 @@ def extract_company_info(thread):
         elif _is_own_firm_name(right) and not _is_own_firm_name(left):
             subject_clean = left
 
-    deck_match = re.search(r'(.+?)\s+(deck|pitch|presentation)', subject_clean, re.IGNORECASE)
-    company_name = deck_match.group(1).strip() if deck_match else subject_clean or 'Company from Email'
+    deck_match = re.search(r'(.+?)\s+(deck|pitch|presentation|preso)', subject_clean, re.IGNORECASE)
+    company_name = deck_match.group(1).strip() if deck_match else subject_clean or ''
 
     # Strip common meeting/intro phrases to extract just the company name
     company_name = re.sub(
@@ -149,7 +156,7 @@ def extract_company_info(thread):
 
     # Final guard: never use our own firm name as a deal
     if _is_own_firm_name(company_name):
-        company_name = 'Company from Email'
+        company_name = ''
 
     return {'name': company_name, 'description': f'Created from email: {subject}'}
 
@@ -1189,7 +1196,7 @@ def process_email(thread):
 
     company_data = extract_company_info(thread)
 
-    # Check for deck links and analyze if found
+    # Check for deck links and analyze if found (may override company name)
     deck_links = extract_deck_links(f'{subject} {body}')
     deck_description = None
     analysis = None
@@ -1271,6 +1278,17 @@ def process_email(thread):
             else:
                 print(f'  ✗ Could not download attachment')
 
+    # If company name couldn't be resolved, ask the user via WhatsApp
+    if not company_data['name']:
+        sender_phone = EMAIL_TO_PHONE.get(sender_email)
+        if sender_phone:
+            send_whatsapp(sender_phone, f"New email: \"{subject}\"\n\nI couldn't figure out the company name. What's the company?")
+            print(f'  Asked user for company name via WhatsApp')
+        else:
+            print(f'  Skipped: Could not determine company name and no phone for sender')
+        mark_email_processed(thread_id)
+        return False
+
     # Check for existing company to avoid duplicates
     existing_company_id = search_hubspot_company(company_data['name'])
     if existing_company_id:
@@ -1305,18 +1323,11 @@ def process_email(thread):
         stage_name = STAGE_NAMES.get(stage_id, stage_id)
         send_confirmation_email(sender_email, company_data['name'], pipeline_name, stage_name, deal_url)
 
-        # Offer full report via WhatsApp if we had a deck analysis
+        # Save state for manual full report request (user must explicitly ask)
         if analysis:
-            sender_phone = EMAIL_TO_PHONE.get(sender_email)
-            if sender_phone:
-                deck_data = parse_analysis_to_deck_data(analysis)
-                deck_url_for_state = deck_links[0] if deck_links else None
-                save_deal_analyzer_state(deck_data, deck_url_for_state)
-
-                summary = format_deck_description(analysis) or analysis[:1500]
-                msg = f"*New deal: {company_data['name']}*\n\n{summary}\n\n---\nWant the full 12-section investment report? Just reply 'full report'."
-                send_whatsapp(sender_phone, msg)
-                print(f'  Sent WhatsApp summary + full report offer to {sender_phone}')
+            deck_data = parse_analysis_to_deck_data(analysis)
+            deck_url_for_state = deck_links[0] if deck_links else None
+            save_deal_analyzer_state(deck_data, deck_url_for_state)
 
         mark_email_processed(thread_id)
         return True
