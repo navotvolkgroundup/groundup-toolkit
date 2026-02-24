@@ -696,6 +696,10 @@ def is_papermark_link(url):
     return 'papermark.com/view/' in url
 
 
+def is_docsend_link(url):
+    return 'docsend.com/view/' in url
+
+
 def fetch_papermark_with_camofox(url):
     """Open a Papermark deck using the Camofox browser, navigate all pages,
     screenshot each one, and return base64 images for Claude analysis."""
@@ -791,6 +795,113 @@ def fetch_papermark_with_camofox(url):
 
     except Exception as e:
         print(f'    Papermark fetch error: {e}')
+        return None
+
+
+def fetch_docsend_with_camofox(url):
+    """Open a DocSend deck using the Camofox browser, navigate all pages,
+    screenshot each one, and return base64 images for Claude analysis."""
+    import base64
+    import time
+
+    try:
+        # Check Camofox is running
+        health = requests.get(f'{CAMOFOX_BASE}/health', timeout=5).json()
+        if not health.get('ok'):
+            print('    Camofox browser not healthy, skipping DocSend fetch')
+            return None
+
+        # Open tab
+        tab_resp = requests.post(f'{CAMOFOX_BASE}/tabs', json={
+            'userId': 'deal-automation',
+            'sessionKey': 'docsend-fetch',
+            'url': url
+        }, timeout=15).json()
+        tab_id = tab_resp.get('tabId')
+        if not tab_id:
+            print(f'    Failed to open tab: {tab_resp}')
+            return None
+
+        time.sleep(8)
+
+        # Check if email gate is present (DocSend often requires email)
+        snap = requests.get(f'{CAMOFOX_BASE}/tabs/{tab_id}/snapshot',
+                            params={'userId': 'deal-automation'}, timeout=10).json()
+        snapshot_text = snap.get('snapshot', '')
+
+        # DocSend email gate: look for email input + "Continue" or "View Document"
+        if re.search(r'email|e-mail', snapshot_text, re.IGNORECASE) and \
+           re.search(r'continue|view|submit', snapshot_text, re.IGNORECASE):
+            email_ref = None
+            submit_ref = None
+            for line in snapshot_text.split('\n'):
+                if 'textbox' in line and re.search(r'email|e-mail', line, re.IGNORECASE):
+                    m = re.search(r'\[(\w+)\]', line)
+                    if m:
+                        email_ref = m.group(1)
+                elif re.search(r'button.*(continue|view|submit)', line, re.IGNORECASE):
+                    m = re.search(r'\[(\w+)\]', line)
+                    if m:
+                        submit_ref = m.group(1)
+
+            if email_ref and submit_ref:
+                print('    DocSend email gate detected, entering email...')
+                requests.post(f'{CAMOFOX_BASE}/tabs/{tab_id}/click', json={
+                    'userId': 'deal-automation', 'ref': email_ref
+                }, timeout=10)
+                time.sleep(0.5)
+                requests.post(f'{CAMOFOX_BASE}/tabs/{tab_id}/type', json={
+                    'userId': 'deal-automation', 'ref': email_ref,
+                    'text': config.assistant_email
+                }, timeout=10)
+                time.sleep(1)
+                requests.post(f'{CAMOFOX_BASE}/tabs/{tab_id}/click', json={
+                    'userId': 'deal-automation', 'ref': submit_ref
+                }, timeout=10)
+                time.sleep(8)
+            else:
+                print('    Could not find email gate refs, trying anyway')
+                time.sleep(3)
+
+        # Get page count from snapshot
+        snap = requests.get(f'{CAMOFOX_BASE}/tabs/{tab_id}/snapshot',
+                            params={'userId': 'deal-automation'}, timeout=10).json()
+        snapshot_text = snap.get('snapshot', '')
+
+        # DocSend shows "Page X of Y" or "X / Y"
+        page_match = re.search(r'(?:page\s+)?\d+\s*(?:of|/)\s*(\d+)', snapshot_text, re.IGNORECASE)
+        total_pages = int(page_match.group(1)) if page_match else 1
+        total_pages = min(total_pages, 40)  # Safety cap
+        print(f'    DocSend deck: {total_pages} pages')
+
+        # Screenshot each page
+        images_b64 = []
+        for i in range(total_pages):
+            screenshot_resp = requests.get(
+                f'{CAMOFOX_BASE}/tabs/{tab_id}/screenshot',
+                params={'userId': 'deal-automation'}, timeout=15)
+            if screenshot_resp.status_code == 200:
+                images_b64.append(base64.b64encode(screenshot_resp.content).decode('utf-8'))
+
+            if i < total_pages - 1:
+                # DocSend uses ArrowRight or click to navigate
+                requests.post(f'{CAMOFOX_BASE}/tabs/{tab_id}/press', json={
+                    'userId': 'deal-automation', 'key': 'ArrowRight'
+                }, timeout=10)
+                time.sleep(2)
+
+        # Close tab
+        try:
+            requests.delete(f'{CAMOFOX_BASE}/tabs/{tab_id}',
+                            params={'userId': 'deal-automation'}, timeout=5)
+        except Exception:
+            pass
+
+        print(f'    Captured {len(images_b64)} page screenshots')
+        return images_b64
+
+    except Exception as e:
+        print(f'    DocSend fetch error: {e}')
         return None
 
 
@@ -1214,6 +1325,14 @@ def process_email(thread):
                 analysis = analyze_deck_images_with_claude(images, company_data['name'])
             else:
                 print(f'  ✗ Could not fetch Papermark deck via browser')
+        elif is_docsend_link(link):
+            print(f'  DocSend link detected — using Camofox browser')
+            images = fetch_docsend_with_camofox(link)
+            if images:
+                print(f'  Captured {len(images)} page(s), sending to Claude vision...')
+                analysis = analyze_deck_images_with_claude(images, company_data['name'])
+            else:
+                print(f'  ✗ Could not fetch DocSend deck via browser')
         else:
             deck_content = fetch_deck_with_browser(link, sender_email)
             if deck_content:
