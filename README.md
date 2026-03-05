@@ -1,8 +1,8 @@
 # GroundUp Toolkit v1.0
 
-An open-source automation toolkit for venture capital teams, built on [OpenClaw](https://openclaw.ai). Automates deal flow, meeting management, founder research, CRM updates, and team communication through an AI assistant ("Christina") connected via WhatsApp and a web dashboard.
+An open-source automation toolkit for venture capital teams, built on [OpenClaw](https://openclaw.ai). Automates deal flow, meeting management, founder research, CRM updates, and team communication through a customizable AI assistant connected via WhatsApp and a web dashboard.
 
-Built and battle-tested by [GroundUp Ventures](https://groundup.vc).
+Built and battle-tested by [GroundUp Ventures](https://groundup.vc). Ships with a default assistant persona ("Christina") that you can rename and customize to fit your firm.
 
 ## Skills
 
@@ -19,16 +19,16 @@ Built and battle-tested by [GroundUp Ventures](https://groundup.vc).
 | **VC Automation** | WhatsApp command | Processes meeting notes into CRM updates, researches founders on LinkedIn and Crunchbase |
 | **Ping Teammate** | WhatsApp command | Calls a teammate's phone via Twilio when you need them urgently |
 | **Google Workspace** | WhatsApp command | Calendar queries, Gmail search, Google Docs operations via gws-auth CLI |
-| **LinkedIn Research** | WhatsApp command | Profile and company research using headless Chromium browser (logged in as Christina) |
+| **LinkedIn Research** | WhatsApp command | Profile and company research using headless Chromium browser |
 | **Deal Logger** | WhatsApp command | Tracks deal discussions and notes from WhatsApp conversations |
 
 ## Dashboard
 
 A Next.js web dashboard for the team at `http://<server>:3000`:
 
-- Google OAuth login restricted to `@groundup.vc`
+- Google OAuth login restricted to your team's email domain (configurable in `dashboard/lib/auth.ts`)
 - Real-time service status for all 13 skills
-- Chat interface with Christina (AI assistant)
+- Chat interface with your AI assistant (name configurable in `config.yaml`)
 - Service help section with trigger info and commands
 - Dark/light theme
 
@@ -129,9 +129,10 @@ crontab cron/crontab.example
 
 | File | Purpose |
 |------|---------|
-| `config.yaml` | Team members, service settings, scheduling (Shabbat-aware) |
+| `config.yaml` | Team members, assistant name, service settings, scheduling (Shabbat-aware) |
 | `.env` | API keys: Anthropic, Brave Search, Twilio, HubSpot (Maton) |
 | `dashboard/.env` | Dashboard: NEXTAUTH_SECRET, Google OAuth credentials |
+| `dashboard/lib/auth.ts` | Allowed email domain for login (change `@groundup.vc` to your domain) |
 
 Required integrations:
 
