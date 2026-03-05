@@ -11,7 +11,7 @@ session.json
 
 # Node
 node_modules/
-package-lock.json
+/package-lock.json
 
 # Python
 __pycache__/

@@ -150,14 +150,33 @@ def fetch_deck_content(source):
     """Fetch deck content from a URL or local file path.
 
     Supports:
-    - HTTP/HTTPS URLs (returns HTML/text)
-    - Local file paths (.txt, .md)
-    - Local PDF files (requires pdftotext)
+    - HTTP/HTTPS URLs (returns HTML/text) — restricted to known deck platforms
+    - Local file paths (.txt, .md) — restricted to allowed directories
+    - Local PDF files (requires pdftotext) — restricted to allowed directories
 
     Returns plain text content or None on failure.
     """
     if source.startswith('/') or source.startswith('./'):
         return _read_local_file(source)
+
+    # Security: SSRF protection — only allow known deck hosting domains
+    _ALLOWED_DOMAINS = {
+        'docsend.com', 'www.docsend.com',
+        'docs.google.com', 'drive.google.com',
+        'dropbox.com', 'www.dropbox.com',
+        'papermark.com', 'www.papermark.com',
+        'pitch.com', 'www.pitch.com',
+        'slides.com', 'www.slides.com',
+        'canva.com', 'www.canva.com',
+    }
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(source)
+        if parsed.hostname not in _ALLOWED_DOMAINS:
+            print(f"  Blocked URL: domain {parsed.hostname} not in allowlist")
+            return None
+    except Exception:
+        return None
 
     try:
         response = requests.get(
@@ -173,21 +192,39 @@ def fetch_deck_content(source):
         return None
 
 
+# Security: restrict local file reads to known safe directories
+_ALLOWED_LOCAL_DIRS = [
+    os.path.expanduser("~/decks"),
+    "/tmp",
+    os.path.expanduser("~/.groundup-toolkit/state"),
+]
+
+
 def _read_local_file(path):
     """Read a local file. Converts PDFs via pdftotext if available."""
-    if not os.path.exists(path):
+    # Security: prevent path traversal
+    real_path = os.path.realpath(os.path.expanduser(path))
+    allowed = any(
+        real_path.startswith(os.path.realpath(d) + os.sep) or real_path == os.path.realpath(d)
+        for d in _ALLOWED_LOCAL_DIRS
+    )
+    if not allowed:
+        print(f"  Blocked local file read: {path} is outside allowed directories")
+        return None
+
+    if not os.path.exists(real_path):
         return None
     try:
-        if path.lower().endswith('.pdf'):
+        if real_path.lower().endswith('.pdf'):
             result = subprocess.run(
-                ['pdftotext', '-layout', path, '-'],
+                ['pdftotext', '-layout', real_path, '-'],
                 capture_output=True, text=True, timeout=30
             )
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout
             return None
         else:
-            with open(path, 'r', errors='ignore') as f:
+            with open(real_path, 'r', errors='ignore') as f:
                 return f.read()
     except Exception:
         return None

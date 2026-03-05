@@ -1,4 +1,7 @@
 import { NextRequest } from "next/server"
+import { auth } from "@/lib/auth"
+
+const MAX_MESSAGE_LENGTH = 10000
 
 const responses: Record<string, string> = {
   default: `Hey! I'm Christina, your AI assistant at GroundUp. I can help you with deal sourcing, meeting prep, portfolio monitoring, and more.
@@ -31,9 +34,26 @@ Want me to pull the full report on any of these?`,
 }
 
 export async function POST(req: NextRequest) {
-  const { message, context } = await req.json()
+  // Security: explicit auth check (defense-in-depth beyond middleware)
+  const session = await auth()
+  if (!session) {
+    return new Response("Unauthorized", { status: 401 })
+  }
 
-  const responseText = context && responses[context]
+  // Security: validate input
+  let body
+  try {
+    body = await req.json()
+  } catch {
+    return new Response("Bad Request", { status: 400 })
+  }
+
+  const { message, context } = body
+  if (typeof message !== "string" || message.length > MAX_MESSAGE_LENGTH) {
+    return new Response("Bad Request", { status: 400 })
+  }
+
+  const responseText = context && typeof context === "string" && responses[context]
     ? responses[context]
     : generateResponse(message)
 
@@ -80,5 +100,6 @@ function generateResponse(message: string): string {
     return responses.default
   }
 
-  return `I received your message: "${message}"\n\nI can help with:\n- **Deal Sourcing** — tracking founders and pre-founding signals\n- **Meeting Management** — reminders, briefs, attendance\n- **Portfolio Monitoring** — news, signals, alerts\n- **Deck Analysis** — AI-powered pitch deck scoring\n- **System Health** — infrastructure monitoring\n\nWhat would you like to explore?`
+  // Security: don't echo raw user input back in response
+  return `I can help with:\n- **Deal Sourcing** — tracking founders and pre-founding signals\n- **Meeting Management** — reminders, briefs, attendance\n- **Portfolio Monitoring** — news, signals, alerts\n- **Deck Analysis** — AI-powered pitch deck scoring\n- **System Health** — infrastructure monitoring\n\nWhat would you like to explore?`
 }

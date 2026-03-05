@@ -52,7 +52,7 @@ PROCESSED_LABEL = "KoR-Processed"
 # Data directory for SQLite DB
 _TOOLKIT_ROOT = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..', '..'))
 _DATA_DIR = os.path.join(_TOOLKIT_ROOT, 'data')
-os.makedirs(_DATA_DIR, exist_ok=True)
+os.makedirs(_DATA_DIR, mode=0o700, exist_ok=True)
 DB_PATH = os.path.join(_DATA_DIR, 'keep-on-radar.db')
 LOCK_PATH = os.path.join(_DATA_DIR, 'keep-on-radar.lock')
 

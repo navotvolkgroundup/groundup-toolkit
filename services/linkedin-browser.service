@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/root/.cache/ms-playwright/chromium-1208/chrome-linux/chrome --headless=new --no-sandbox --disable-gpu --remote-debugging-port=18801 --user-data-dir=/root/.openclaw/browser-data/linkedin about:blank
+ExecStart=/root/.cache/ms-playwright/chromium-1208/chrome-linux/chrome --headless=new --no-sandbox --disable-gpu --remote-debugging-port=18801 --remote-debugging-address=127.0.0.1 --user-data-dir=/root/.openclaw/browser-data/linkedin about:blank
 Restart=always
 RestartSec=5
 KillMode=process

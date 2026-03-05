@@ -52,7 +52,7 @@ LINKEDIN_NAV_DELAY = 4  # seconds between LinkedIn page navigations
 # Data directory
 _TOOLKIT_ROOT = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..', '..'))
 _DATA_DIR = os.path.join(_TOOLKIT_ROOT, 'data')
-os.makedirs(_DATA_DIR, exist_ok=True)
+os.makedirs(_DATA_DIR, mode=0o700, exist_ok=True)
 DB_PATH = os.path.join(_DATA_DIR, 'founder-scout.db')
 LOCK_PATH = os.path.join(_DATA_DIR, 'founder-scout.lock')
 

@@ -29,15 +29,16 @@ def run_gws(resource, params=None, body=None, timeout=30):
         body: Dict of request body (passed via --json)
         timeout: Command timeout in seconds
     """
-    cmd = f"gws-auth {resource}"
+    # Security: use list-based subprocess to prevent shell injection
+    cmd = ['gws-auth'] + resource.split()
     if params:
-        cmd += f" --params '{json.dumps(params)}'"
+        cmd += ['--params', json.dumps(params)]
     if body:
-        cmd += f" --json '{json.dumps(body)}'"
+        cmd += ['--json', json.dumps(body)]
 
     try:
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=timeout,
+            cmd, capture_output=True, text=True, timeout=timeout,
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
@@ -176,10 +177,11 @@ def _gws_send_simple(to, subject, body_text):
         with os.fdopen(fd, 'w') as f:
             f.write(body_text)
 
-        # Shell-escape subject and use cat for body to avoid arg length issues
-        escaped_subject = subject.replace("'", "'\\''")
-        cmd = f"gws-auth gmail +send --to '{to}' --subject '{escaped_subject}' --body \"$(cat '{body_file}')\""
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+        # Security: use list-based subprocess to prevent shell injection
+        with open(body_file, 'r') as bf:
+            body_content = bf.read()
+        cmd = ['gws-auth', 'gmail', '+send', '--to', to, '--subject', subject, '--body', body_content]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
         if result.returncode != 0:
             # Fallback to raw RFC 2822 API
