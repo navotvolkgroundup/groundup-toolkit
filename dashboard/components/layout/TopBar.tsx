@@ -1,10 +1,11 @@
 "use client"
 
-import { Sun, Moon, Bell, Search, LogOut } from "lucide-react"
+import { Sun, Moon, Search, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useTheme } from "@/lib/hooks/useTheme"
 import { useServicesStore } from "@/lib/store/servicesStore"
+import { NotificationPanel } from "@/components/notifications/NotificationPanel"
 import { signOut } from "next-auth/react"
 
 export function TopBar() {
@@ -31,10 +32,7 @@ export function TopBar() {
         </div>
 
         {/* Notifications */}
-        <Button variant="ghost" size="icon" className="relative h-9 w-9 text-muted-foreground hover:text-foreground">
-          <Bell className="h-4 w-4" />
-          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />
-        </Button>
+        <NotificationPanel />
 
         {/* Theme toggle */}
         <Button

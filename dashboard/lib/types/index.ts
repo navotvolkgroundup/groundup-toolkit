@@ -43,3 +43,15 @@ export interface ActivityEntry {
   triggeredBy: string
   timestamp: string
 }
+
+export type NotificationLevel = "info" | "warning" | "error" | "success"
+
+export interface Notification {
+  id: string
+  serviceName: string
+  serviceIcon: string
+  message: string
+  level: NotificationLevel
+  timestamp: string
+  read: boolean
+}
