@@ -1,166 +1,206 @@
-# GroundUp Toolkit
+# GroundUp Toolkit v1.0
 
-An open-source automation toolkit for venture capital teams, built on [OpenClaw](https://openclaw.ai). Automates deal flow, meeting management, CRM updates, and team communication through an AI assistant connected via WhatsApp.
+An open-source automation toolkit for venture capital teams, built on [OpenClaw](https://openclaw.ai). Automates deal flow, meeting management, founder research, CRM updates, and team communication through an AI assistant ("Christina") connected via WhatsApp and a web dashboard.
 
 Built and battle-tested by [GroundUp Ventures](https://groundup.vc).
 
-## What It Does
+## Skills
 
-| Skill | Description |
-|-------|-------------|
-| **Meeting Reminders** | WhatsApp alerts 10 min before meetings with attendee context from HubSpot, LinkedIn, and Crunchbase |
-| **Meeting Bot** | Auto-joins Google Meet calls, records, extracts action items with Claude AI, emails summaries |
-| **Deal Automation** | Monitors Gmail for deal emails, auto-creates HubSpot companies and deals |
-| **Deck Analyzer** | Extracts structured data from pitch decks (DocSend, Google Drive, Dropbox) |
-| **VC Automation** | Processes meeting notes into CRM updates, researches founders |
-| **Ping Teammate** | Call a teammate's phone via WhatsApp command using Twilio |
-| **Google Workspace** | Calendar, Gmail, and Docs operations via gog CLI |
-| **LinkedIn** | Profile research via MCP bridge |
-| **Keep on Radar** | Monthly review of watchlist deals — researches company updates, sends digests, handles pass/keep/note actions |
-| **Deal Logger** | Tracks deal discussions from WhatsApp conversations |
+| Skill | Trigger | Description |
+|-------|---------|-------------|
+| **Meeting Reminders** | Every 5 min (cron) | WhatsApp alerts 10 min before meetings with attendee context from HubSpot, LinkedIn, and Crunchbase |
+| **Meeting Bot** | Every 2–3 min (cron) | Auto-joins Google Meet calls, records audio, transcribes, extracts action items with Claude, emails summaries |
+| **Email-to-Deal Logger** | Every 2 hrs (cron) | Monitors Gmail for founder intros and deal emails, auto-creates HubSpot companies and deals with extracted context |
+| **Deck Analyzer** | WhatsApp command | Extracts structured data from pitch decks (DocSend, Google Drive, Dropbox) using Camofox browser |
+| **Deal Analyzer** | WhatsApp / standalone | Full investment memo — 12-section AI analysis, market sizing, team eval, competitive landscape |
+| **Founder Scout** | Daily + weekly (cron) | Scans LinkedIn for pre-founding signals (stealth updates, vesting cliffs, new company registrations) |
+| **Keep on Radar** | Monthly + replies (cron) | Reviews HubSpot watchlist deals, researches updates, sends digest emails, handles pass/keep/note actions |
+| **Content Writer** | WhatsApp command | Drafts LinkedIn posts, emails, and memos using customizable voice profiles |
+| **VC Automation** | WhatsApp command | Processes meeting notes into CRM updates, researches founders on LinkedIn and Crunchbase |
+| **Ping Teammate** | WhatsApp command | Calls a teammate's phone via Twilio when you need them urgently |
+| **Google Workspace** | WhatsApp command | Calendar queries, Gmail search, Google Docs operations via gws-auth CLI |
+| **LinkedIn Research** | WhatsApp command | Profile and company research using headless Chromium browser (logged in as Christina) |
+| **Deal Logger** | WhatsApp command | Tracks deal discussions and notes from WhatsApp conversations |
 
-Plus operational scripts:
-- **Health Check** - Monitors gateway, WhatsApp, disk, memory; auto-recovers and alerts
-- **WhatsApp Watchdog** - Tests WhatsApp connection every 5 min, restarts gateway, calls admin if QR re-scan needed
-- **Shabbat-Aware Scheduler** - Respects Jewish Shabbat hours for automation timing
+## Dashboard
+
+A Next.js web dashboard for the team at `http://<server>:3000`:
+
+- Google OAuth login restricted to `@groundup.vc`
+- Real-time service status for all 13 skills
+- Chat interface with Christina (AI assistant)
+- Service help section with trigger info and commands
+- Dark/light theme
+
+## Systemd Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `christina-dashboard` | 3000 | Next.js dashboard (production build) |
+| `linkedin-browser` | 18801 | Headless Chromium with LinkedIn session (CDP, localhost-only) |
+| `openclaw-gateway` | 18789 | WhatsApp gateway (OpenClaw) |
+
+## Cron Schedule
+
+| Schedule | Job | Log |
+|----------|-----|-----|
+| `*/3 * * *` | Meeting auto-join (detect & join Google Meet) | meeting-auto-join.log |
+| `*/5 * * *` | Meeting reminders (WhatsApp alerts) | meeting-reminders.log |
+| `*/5 * * *` | WhatsApp watchdog (connection health) | whatsapp-watchdog.log |
+| `*/15 * * *` | OpenClaw health check (gateway + system) | openclaw-health.log |
+| `0 */2 * * *` | Meeting bot (process recordings & notes) | meeting-bot.log |
+| `0 */2 * * *` | Christina processor (scheduling + deal logging) | christina.log |
+| `0 */2 * * *` | Keep on Radar — check email replies | keep-on-radar.log |
+| `30 8-22/2 * * 0-4` | Email-to-Deal pipeline (Sun–Thu, 8am–10pm) | deal-automation.log |
+| `30 8-18/2 * * 5` | Email-to-Deal pipeline (Fri, stops before Shabbat) | deal-automation.log |
+| `0 7 * * *` | Founder Scout — daily LinkedIn scan | founder-scout.log |
+| `0 8 * * 0` | Founder Scout — weekly briefing | founder-scout.log |
+| `0 14 * * 3,6` | Founder Scout — watchlist re-scan | founder-scout.log |
+| `0 10 15 * *` | Keep on Radar — monthly review | keep-on-radar.log |
+| `0 4 * * *` | Daily maintenance + OpenClaw auto-update | daily-maintenance.log |
 
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  WhatsApp    │◄───►│   OpenClaw    │◄───►│  Skills &   │
-│  (Team Chat) │     │   Gateway     │     │  Scripts    │
-└─────────────┘     └──────────────┘     └──────┬──────┘
-                                                 │
-                    ┌────────────────────────────┤
-                    │            │               │
-              ┌─────▼─────┐ ┌───▼───┐ ┌────────▼────────┐
-              │  Google    │ │HubSpot│ │  Claude AI       │
-              │  Workspace │ │  CRM  │ │  (Analysis)      │
-              └───────────┘ └───────┘ └─────────────────┘
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   WhatsApp   │◄───►│   OpenClaw   │◄───►│   Skills &   │
+│  (Team Chat) │     │   Gateway    │     │   Scripts    │
+└──────────────┘     └──────────────┘     └──────┬───────┘
+                                                  │
+       ┌──────────────┐    ┌──────────────────────┤
+       │  Dashboard   │    │         │            │
+       │  (Next.js)   │    │         │            │
+       └──────────────┘    │         │            │
+                     ┌─────▼───┐ ┌───▼───┐ ┌─────▼──────┐
+                     │ Google  │ │HubSpot│ │  Claude AI  │
+                     │Workspace│ │  CRM  │ │ (Anthropic) │
+                     └─────────┘ └───────┘ └────────────┘
 ```
+
+## Standalone Exports
+
+The **Deal Analyzer** is available as a standalone Python package:
+
+```bash
+cd exports/deal-analyzer
+pip install -r requirements.txt
+export ANTHROPIC_API_KEY="sk-..."
+python example.py https://docsend.com/view/abc123
+```
+
+Generates a 12-section investment memo (markdown + HTML) with market sizing, team evaluation, competitive analysis, and a TL;DR.
 
 ## Requirements
 
-- **Server**: Ubuntu 22.04+ (or Debian-based), 2GB RAM, 20GB disk
-- **Node.js**: 18+ (installed automatically by `install.sh`)
-- **Python**: 3.10+ (installed automatically by `install.sh`)
+- **Server**: Ubuntu 22.04+ (arm64 or amd64), 2GB RAM, 20GB disk
+- **Node.js**: 18+
+- **Python**: 3.10+
+- **OpenClaw**: v0.24+
 
 ## Quick Start
 
-### 1. Clone and configure
-
 ```bash
+# Clone and configure
 git clone https://github.com/navotvolkgroundup/groundup-toolkit.git
 cd groundup-toolkit
-
-# Copy and fill in your config
 cp config.example.yaml config.yaml
 cp .env.example .env
-# Edit both files with your values
-```
+# Edit both files with your API keys and team settings
 
-### 2. Install
-
-```bash
+# Install
 sudo bash install.sh
-```
 
-### 3. Connect services
-
-```bash
-# Google OAuth
+# Connect Google + WhatsApp
 gog auth login
-
-# WhatsApp
-openclaw channels login
-# Scan QR code from your phone
+openclaw channels login   # Scan QR code
 
 # Start gateway
-nohup openclaw gateway > /var/log/openclaw-gateway.log 2>&1 &
-```
+systemctl enable --now openclaw-gateway
 
-### 4. Set up cron jobs
+# Deploy dashboard
+cd dashboard && npm install && npm run build
+systemctl enable --now christina-dashboard
 
-```bash
-# Edit crontab.example: set TOOLKIT_DIR to your actual path
-nano cron/crontab.example
-
-# Then install (WARNING: this replaces your existing crontab):
+# Install cron jobs
 crontab cron/crontab.example
-```
-
-### 5. Verify
-
-```bash
-openclaw channels status
-bash scripts/health-check.sh
 ```
 
 ## Configuration
 
-All configuration lives in two files:
+| File | Purpose |
+|------|---------|
+| `config.yaml` | Team members, service settings, scheduling (Shabbat-aware) |
+| `.env` | API keys: Anthropic, Brave Search, Twilio, HubSpot (Maton) |
+| `dashboard/.env` | Dashboard: NEXTAUTH_SECRET, Google OAuth credentials |
 
-### config.yaml
-Team members, service settings, scheduling preferences. See [config.example.yaml](config.example.yaml).
+Required integrations:
 
-### .env
-API keys and secrets. See [.env.example](.env.example).
-
-Required services:
-| Service | What For | Sign Up |
-|---------|----------|---------|
-| [OpenClaw](https://openclaw.ai) | WhatsApp gateway | Required |
-| [Anthropic](https://console.anthropic.com) | Claude AI for analysis | Required |
-| [Maton](https://maton.ai) | HubSpot API gateway | For CRM features |
-| [Twilio](https://twilio.com) | Phone call alerts | For ping/alerts |
-| [Brave Search](https://brave.com/search/api) | Web search | For research |
-| Google Workspace | Calendar, Gmail, Drive | Required |
-
-## Documentation
-
-- [Setup Guide](docs/setup-guide.md) - Detailed installation walkthrough
-- [Architecture](docs/architecture.md) - How the system works
-- [Skills Reference](docs/skills.md) - Each skill explained
-- [Services Setup](docs/services.md) - External service configuration
+| Service | Purpose |
+|---------|---------|
+| [OpenClaw](https://openclaw.ai) | WhatsApp gateway |
+| [Anthropic](https://console.anthropic.com) | Claude AI (analysis, memos, content) |
+| [Google Workspace](https://workspace.google.com) | Calendar, Gmail, Drive |
+| [Maton](https://maton.ai) | HubSpot API gateway |
+| [Twilio](https://twilio.com) | Phone call alerts |
+| [Brave Search](https://brave.com/search/api) | Web research |
 
 ## Project Structure
 
 ```
 groundup-toolkit/
-├── config.example.yaml        # All settings (team, services, schedule)
-├── .env.example               # API keys template
-├── install.sh                 # Server setup
-├── skills/                    # OpenClaw skills
-│   ├── meeting-reminders/     # WhatsApp meeting alerts
-│   ├── meeting-bot/           # Auto-join & record meetings
-│   ├── deal-automation/       # Email → CRM deals
-│   ├── deck-analyzer/         # Pitch deck extraction
-│   ├── vc-automation/         # Meeting notes → CRM
-│   ├── ping-teammate/         # Phone call pinger
-│   ├── google-workspace/      # Calendar/Gmail/Docs
-│   ├── keep-on-radar/         # Monthly watchlist review
-│   ├── linkedin/              # Profile research
-│   └── deal-logger/           # WhatsApp deal tracking
-├── scripts/                   # Operational scripts
-│   ├── health-check.sh        # System monitoring
-│   ├── whatsapp-watchdog.sh   # Connection monitor
+├── dashboard/                  # Next.js web dashboard
+│   ├── app/                    # Pages and API routes
+│   ├── components/             # React components (chat, services, layout)
+│   └── lib/                    # Auth, stores, types, utilities
+├── skills/                     # OpenClaw WhatsApp skills
+│   ├── meeting-reminders/      # Pre-meeting WhatsApp alerts
+│   ├── meeting-bot/            # Auto-join, record, transcribe meetings
+│   ├── deal-analyzer/          # Full investment memo generation
+│   ├── deck-analyzer/          # Pitch deck extraction (DocSend, etc.)
+│   ├── founder-scout/          # LinkedIn pre-founding signal scanner
+│   ├── keep-on-radar/          # Monthly watchlist review + digest
+│   ├── content-writer/         # AI-powered content drafting
+│   ├── vc-automation/          # Meeting notes → CRM, founder research
+│   ├── deal-logger/            # WhatsApp deal conversation tracking
+│   ├── ping-teammate/          # Twilio phone call pinger
+│   ├── google-workspace/       # Calendar, Gmail, Docs commands
+│   └── linkedin/               # Profile research via headless browser
+├── exports/                    # Standalone packages
+│   └── deal-analyzer/          # Pip-installable deal analysis library
+├── scripts/                    # Operational scripts
 │   ├── email-to-deal-automation.py
-│   └── run-scheduled.sh       # Shabbat-aware scheduler
-├── lib/                       # Shared config loaders
-│   ├── config.py              # Python config
-│   └── config.js              # Node.js config
-├── cron/                      # Cron job templates
-└── docs/                      # Documentation
+│   ├── daily-maintenance.sh
+│   └── run-scheduled.sh        # Shabbat-aware scheduler
+├── services/                   # Systemd unit files
+│   └── linkedin-browser.service
+├── lib/                        # Shared libraries
+│   ├── config.py / config.js   # Config loaders
+│   ├── gws.py                  # Google Workspace operations
+│   ├── safe_url.py             # SSRF protection
+│   └── safe_log.py             # Sanitized error logging
+├── config.example.yaml
+├── .env.example
+└── install.sh
 ```
+
+## Security
+
+The toolkit includes security hardening (see `_security-audit/`):
+- API route auth + rate limiting
+- SSRF protection with domain allowlists and DNS pinning
+- Input validation on all endpoints
+- HTTP security headers
+- Dedicated unprivileged user for browser service
+- No shell injection (list-based subprocess everywhere)
+- Sanitized error logging (no credential leaks)
 
 ## License
 
-MIT - see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
 
 ## Contributing
 
-Contributions welcome! This toolkit was built for VC workflows but the patterns (WhatsApp automation, meeting management, CRM integration) apply broadly. Open an issue or PR.
+Contributions welcome. This toolkit was built for VC workflows but the patterns (WhatsApp automation, meeting management, CRM integration) apply broadly. Open an issue or PR.
 
 ---
 

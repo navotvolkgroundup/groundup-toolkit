@@ -41,13 +41,11 @@ export async function POST(req: NextRequest) {
   // Security: rate limiting
   const { ok } = limiter.check(req)
   if (!ok) {
-    console.log("[chat] rate limited")
     return new Response("Too Many Requests", { status: 429 })
   }
 
   // Security: explicit auth check (defense-in-depth beyond middleware)
   const session = await auth()
-  console.log("[chat] auth session:", session ? session.user?.email : "null")
   if (!session) {
     return new Response("Unauthorized", { status: 401 })
   }
@@ -56,8 +54,7 @@ export async function POST(req: NextRequest) {
   let body
   try {
     body = await req.json()
-  } catch (e) {
-    console.log("[chat] JSON parse error:", e)
+  } catch {
     return new Response("Bad Request", { status: 400 })
   }
 
