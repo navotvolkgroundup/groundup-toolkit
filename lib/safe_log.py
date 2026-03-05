@@ -18,8 +18,9 @@ _REDACT_PATTERNS = [
     (re.compile(r'([\?&](key|token|secret|api_key|apikey|access_token|auth)=)[^&\s]+', re.I), r'\1[REDACTED]'),
     # Authorization headers
     (re.compile(r'(Authorization:\s*(?:Bearer|Basic|Token)\s+)\S+', re.I), r'\1[REDACTED]'),
-    # Common API key patterns
-    (re.compile(r'(sk-ant-api\d{2}-)[A-Za-z0-9_-]+', re.I), r'\1[REDACTED]'),
+    # Common API key patterns (Anthropic, Google, generic sk- keys)
+    (re.compile(r'sk-ant-[A-Za-z0-9_-]{10,}'), '[REDACTED]'),
+    (re.compile(r'sk-[A-Za-z0-9_-]{20,}'), '[REDACTED]'),
     (re.compile(r'(GOCSPX-)[A-Za-z0-9_-]+', re.I), r'\1[REDACTED]'),
     # Generic long hex/base64 strings that look like keys (32+ chars)
     (re.compile(r'(?<=[=:\s])[A-Za-z0-9+/=_-]{40,}'), '[REDACTED]'),
@@ -44,3 +45,4 @@ def safe_error(context, exception, max_len=300):
     """
     sanitized = sanitize_error(str(exception))[:max_len]
     print(f"  {context}: {sanitized}", file=sys.stderr)
+    return sanitized
