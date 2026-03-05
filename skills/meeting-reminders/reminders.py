@@ -39,6 +39,7 @@ except ImportError:
     ENRICHMENT_AVAILABLE = False
 
 WHATSAPP_ACCOUNT = config.whatsapp_account
+GOG_ACCOUNT = config.assistant_email
 
 # Persistent database path (survives reboots, unlike /tmp)
 _TOOLKIT_ROOT = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..', '..'))

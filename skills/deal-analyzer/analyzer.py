@@ -34,6 +34,8 @@ from lib.whatsapp import send_whatsapp
 from lib.email import send_email
 from lib.hubspot import search_company as _search_company, add_note as _add_note
 
+GOG_ACCOUNT = config.assistant_email
+
 # --- Constants ---
 _STATE_DIR = os.path.expanduser("~/.groundup-toolkit/state")
 os.makedirs(_STATE_DIR, mode=0o700, exist_ok=True)

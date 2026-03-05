@@ -43,6 +43,7 @@ from lib.hubspot import (
 # --- Configuration ---
 
 WHATSAPP_ACCOUNT = config.whatsapp_account
+GOG_ACCOUNT = config.assistant_email
 PORTAL_ID = config.hubspot_portal_id
 
 KEEP_ON_RADAR_STAGE = "1138024523"
