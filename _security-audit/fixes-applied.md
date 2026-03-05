@@ -57,3 +57,55 @@
   - `skills/keep-on-radar/radar.py`
   - `skills/meeting-reminders/reminders.py`
 - Data directories now created with owner-only access
+
+---
+
+## Round 2 — Remaining Findings (2026-03-05)
+
+## Fix 13: Browser Service — Non-root User [H-6]
+- Created dedicated `linkedin-browser` system user
+- Chromium copied to `/opt/chromium-1208/` (accessible without traversing `/root/`)
+- Browser data moved to `/home/linkedin-browser/browser-data/`
+- Service runs as `User=linkedin-browser` with `--no-sandbox --disable-crash-reporter`
+- CDP still bound to localhost only (`--remote-debugging-address=127.0.0.1`)
+
+## Fix 14: Rate Limiting — Dashboard API [M-4]
+- Created `dashboard/lib/rate-limit.ts` — in-memory token bucket per IP
+- `POST /api/chat`: 30 requests/min/IP
+- `GET/PATCH /api/services`: 60 requests/min/IP
+- Auto-cleanup of expired entries every 5 minutes
+
+## Fix 15: DNS Rebinding TOCTOU — `lib/safe_url.py` [M-6]
+- Added `_resolve_and_validate()` that resolves DNS and validates against private IP ranges
+- `safe_request()` now pins the resolved IP, rewrites URL to use IP directly, sets `Host` header
+- Prevents DNS rebinding between validation and request
+
+## Fix 16: Pin All npm Dependencies — `dashboard/package.json` [M-7]
+- Removed all `^` caret ranges from every dependency
+- All versions are now exact pins (e.g., `"5.90.21"` not `"^5.90.21"`)
+
+## Fix 17: Hardcoded Email — `lib/gws.py` [M-9]
+- Replaced `'christina@groundup.vc'` with `config.assistant_email` in `get_google_access_token()`
+
+## Fix 18: JWT Session Expiry — `dashboard/lib/auth.ts` [L-1]
+- Set `session.maxAge` to 7 days (was 30 days default)
+
+## Fix 19: Cookie Security — `dashboard/lib/auth.ts` [L-6]
+- Explicit cookie options: `httpOnly: true`, `sameSite: "lax"`, `secure: true`
+- Cookie name: `__Secure-next-auth.session-token`
+
+## Fix 20: HubSpot Stage ID — `skills/keep-on-radar/radar.py`, `lib/config.py` [L-7]
+- Moved hardcoded HubSpot stage ID to `config.hubspot_keep_on_radar_stage`
+- Falls back to original value for backward compatibility
+
+## Fix 21: Sanitized Error Logging — `lib/safe_log.py` [L-4]
+- New utility that strips API keys, auth headers, and credential-like strings from error messages
+- `safe_error(context, exception, max_len=300)` for use across Python scripts
+
+## Fix 22: Filename Sanitization — `exports/deal-analyzer/example.py` [L-9]
+- Improved regex: `re.sub(r'[^\w.-]', '-', ...)` with `.strip('-')[:100]`
+- Prevents path traversal and overly long filenames
+
+## Fix 23: CSRF Protection [L-3]
+- Analyzed and confirmed: already covered by JSON-only Content-Type parsing + SameSite=Lax cookies
+- No additional custom header check needed

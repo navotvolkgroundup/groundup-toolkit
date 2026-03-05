@@ -7,11 +7,11 @@ Wants=network-online.target
 # Security: run as dedicated unprivileged user (not root)
 User=linkedin-browser
 Group=linkedin-browser
-ExecStart=/root/.cache/ms-playwright/chromium-1208/chrome-linux/chrome --headless=new --disable-setuid-sandbox --disable-gpu --remote-debugging-port=18801 --remote-debugging-address=127.0.0.1 --user-data-dir=/root/.openclaw/browser-data/linkedin about:blank
+ExecStart=/opt/chromium-1208/chrome-linux/chrome --headless=new --no-sandbox --disable-gpu --disable-crash-reporter --remote-debugging-port=18801 --remote-debugging-address=127.0.0.1 --user-data-dir=/home/linkedin-browser/browser-data about:blank
 Restart=always
 RestartSec=5
 KillMode=process
-Environment=HOME=/root/.openclaw/browser-data/linkedin
+Environment=HOME=/home/linkedin-browser
 
 [Install]
 WantedBy=default.target
