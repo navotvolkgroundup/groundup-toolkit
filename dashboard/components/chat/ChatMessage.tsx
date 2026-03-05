@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils"
 import { ChatMessage as ChatMessageType } from "@/lib/types"
 import ReactMarkdown from "react-markdown"
-import { Zap } from "lucide-react"
+import { ChristinaAvatar } from "@/components/ChristinaAvatar"
 
 export function ChatMessage({ message }: { message: ChatMessageType }) {
   const isUser = message.role === "user"
@@ -11,16 +11,13 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
   return (
     <div className={cn("flex gap-3 px-4 py-2", isUser ? "flex-row-reverse" : "flex-row")}>
       {/* Avatar */}
-      <div
-        className={cn(
-          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium",
-          isUser
-            ? "bg-primary/20 text-primary"
-            : "bg-primary text-primary-foreground"
-        )}
-      >
-        {isUser ? "NV" : <Zap className="h-3.5 w-3.5" />}
-      </div>
+      {isUser ? (
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-medium text-primary">
+          NV
+        </div>
+      ) : (
+        <ChristinaAvatar size="sm" />
+      )}
 
       {/* Message bubble */}
       <div

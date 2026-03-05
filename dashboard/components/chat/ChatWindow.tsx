@@ -2,7 +2,8 @@
 
 import { useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Trash2, Zap } from "lucide-react"
+import { X, Trash2 } from "lucide-react"
+import { ChristinaAvatar } from "@/components/ChristinaAvatar"
 import { Button } from "@/components/ui/button"
 import { useChatStore } from "@/lib/store/chatStore"
 import { ChatMessage } from "./ChatMessage"
@@ -52,9 +53,7 @@ export function ChatWindow() {
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                  <Zap className="h-4 w-4" />
-                </div>
+                <ChristinaAvatar size="sm" />
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold">Christina</span>
@@ -96,9 +95,7 @@ export function ChatWindow() {
             <div ref={scrollRef} className="flex-1 overflow-y-auto py-4">
               {messages.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full text-center px-8">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-4">
-                    <Zap className="h-7 w-7" />
-                  </div>
+                  <ChristinaAvatar size="xl" className="mb-4" />
                   <p className="text-sm font-medium mb-1">Hey, I&apos;m Christina</p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     Your AI assistant at GroundUp. Ask me about deals, meetings, portfolio companies, or any service.

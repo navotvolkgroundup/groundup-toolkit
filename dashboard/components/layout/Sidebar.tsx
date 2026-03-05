@@ -1,7 +1,8 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { LayoutDashboard, MessageSquare, Settings, ChevronLeft, ChevronRight, Zap } from "lucide-react"
+import { LayoutDashboard, MessageSquare, Settings, ChevronLeft, ChevronRight } from "lucide-react"
+import { ChristinaAvatar } from "@/components/ChristinaAvatar"
 import { OnlineDot } from "./StatusBadge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -40,9 +41,7 @@ export function Sidebar({
     >
       {/* Logo area */}
       <div className="flex h-16 items-center gap-3 border-b border-border px-4">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-          <Zap className="h-5 w-5" />
-        </div>
+        <ChristinaAvatar size="md" className="rounded-xl" />
         {!collapsed && (
           <div className="flex flex-col">
             <span className="text-sm font-semibold tracking-tight">Christina</span>
