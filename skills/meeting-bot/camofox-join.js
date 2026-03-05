@@ -36,6 +36,75 @@ function xmlEscape(s) {
         .replace(/'/g, '&apos;');
 }
 
+/**
+ * Extract a header value from a Gmail API message object.
+ */
+function extractHeader(message, headerName) {
+    const headers = (message.payload && message.payload.headers) || [];
+    const h = headers.find(h => h.name.toLowerCase() === headerName.toLowerCase());
+    return h ? h.value : "";
+}
+
+/**
+ * Decode the text body from a Gmail API message object.
+ */
+function extractMessageBody(message) {
+    if (message.payload && message.payload.body && message.payload.body.data) {
+        return Buffer.from(message.payload.body.data, "base64url").toString("utf-8");
+    }
+    if (message.payload && message.payload.parts) {
+        for (const part of message.payload.parts) {
+            if (part.mimeType === "text/plain" && part.body && part.body.data) {
+                return Buffer.from(part.body.data, "base64url").toString("utf-8");
+            }
+        }
+    }
+    return message.snippet || "";
+}
+
+/**
+ * Search Gmail and return full message objects via gws-auth CLI.
+ */
+function searchGmailMessages(query, maxResults) {
+    const params = JSON.stringify({ userId: "me", q: query, maxResults: maxResults || 5 });
+    const listCmd = `gws-auth gmail users messages list --params ${shellEscape(params)} --json`;
+    const listResult = JSON.parse(execSync(listCmd, { timeout: 30000, stdio: "pipe" }).toString());
+    const messageRefs = listResult.messages || [];
+
+    return messageRefs.map(ref => {
+        const getParams = JSON.stringify({ userId: "me", id: ref.id, format: "full" });
+        const getCmd = `gws-auth gmail users messages get --params ${shellEscape(getParams)} --json`;
+        const msg = JSON.parse(execSync(getCmd, { timeout: 30000, stdio: "pipe" }).toString());
+        return {
+            id: msg.id,
+            threadId: msg.threadId,
+            subject: extractHeader(msg, "Subject"),
+            body: extractMessageBody(msg),
+        };
+    });
+}
+
+/**
+ * Resolve a Gmail label name to its ID via gws-auth CLI.
+ * System labels (INBOX, UNREAD, etc.) map to themselves.
+ */
+function resolveLabelId(labelName) {
+    const systemLabels = ["INBOX", "UNREAD", "STARRED", "IMPORTANT", "TRASH", "SPAM", "SENT", "DRAFT"];
+    if (systemLabels.includes(labelName)) return labelName;
+
+    try {
+        const params = JSON.stringify({ userId: "me" });
+        const cmd = `gws-auth gmail users labels list --params ${shellEscape(params)} --json`;
+        const result = JSON.parse(execSync(cmd, { timeout: 15000, stdio: "pipe" }).toString());
+        const labels = result.labels || [];
+        const label = labels.find(l => l.name === labelName);
+        return label ? label.id : null;
+    } catch (e) {
+        console.log("Notes: Label resolution failed: " + e.message);
+        return null;
+    }
+}
+
 // .env loading is handled by the shared config loader (../../lib/config)
 
 const MEETING_URL = process.argv[2] || process.env.MEETING_URL;
@@ -431,16 +500,11 @@ async function processGeminiNotes(meetingTitle) {
     console.log("Notes: Waiting 2 minutes for Gemini to generate notes...");
     await sleep(120000);
 
-    // Search for Gemini notes email
-    const GOG_ACCOUNT = `--account ${shellEscape(config.assistant.email)}`;
-    const searchCmd = `source "$HOME/.env" && gog gmail messages search ${shellEscape("from:gemini-notes@google.com subject:Notes newer_than:1h")} ${GOG_ACCOUNT} --include-body --json --max 5 --no-input`;
-
+    // Search for Gemini notes email via gws-auth
     let notesEmail = null;
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            const result = execSync(searchCmd, { shell: "/bin/bash", timeout: 30000, stdio: "pipe" }).toString();
-            const data = JSON.parse(result);
-            const messages = data.messages || [];
+            const messages = searchGmailMessages("from:gemini-notes@google.com subject:Notes newer_than:1h", 5);
 
             // Match by meeting title (Gemini subjects look like: Notes: "meeting title" Feb 11, 2026)
             const titleLower = meetingTitle.toLowerCase();
@@ -539,8 +603,8 @@ async function processGeminiNotes(meetingTitle) {
         try {
             // Write body to temp file to avoid shell escaping issues
             const bodyFile = "/tmp/notes-email-body-" + name.toLowerCase() + ".txt";
-            fs.writeFileSync(bodyFile, emailBody);
-            const sendCmd = `source "$HOME/.env" && gog gmail send --to ${shellEscape(email)} --subject ${shellEscape(subject)} --body-file ${shellEscape(bodyFile)} ${GOG_ACCOUNT} --force --no-input`;
+            fs.writeFileSync(bodyFile, emailBody, { mode: 0o600 });
+            const sendCmd = `gws-auth gmail +send --to ${shellEscape(email)} --subject ${shellEscape(subject)} --body "$(cat ${shellEscape(bodyFile)})"`;
             execSync(sendCmd, { shell: "/bin/bash", timeout: 30000, stdio: "pipe" });
             console.log("Notes: Sent action items to " + name + " (" + email + ")");
             try { fs.unlinkSync(bodyFile); } catch (_) {}
@@ -559,9 +623,15 @@ async function processGeminiNotes(meetingTitle) {
  */
 function archiveNotesEmail(threadId) {
     try {
-        const GOG_ACCOUNT = `--account ${shellEscape(config.assistant.email)}`;
-        const archiveCmd = `source "$HOME/.env" && gog gmail thread modify ${shellEscape(threadId)} --remove INBOX,UNREAD --add ${shellEscape(config.assistant.name + "-Processed")} ${GOG_ACCOUNT} --force --no-input`;
-        execSync(archiveCmd, { shell: "/bin/bash", timeout: 30000, stdio: "pipe" });
+        const processedLabel = config.assistant.name + "-Processed";
+        const labelId = resolveLabelId(processedLabel);
+        const addLabelIds = labelId ? [labelId] : [];
+        const removeLabelIds = ["INBOX", "UNREAD"];
+
+        const params = JSON.stringify({ userId: "me", id: threadId });
+        const body = JSON.stringify({ addLabelIds, removeLabelIds });
+        const modifyCmd = `echo ${shellEscape(body)} | gws-auth gmail users threads modify --params ${shellEscape(params)} --json`;
+        execSync(modifyCmd, { shell: "/bin/bash", timeout: 30000, stdio: "pipe" });
         console.log("Notes: Archived email (thread " + threadId + ")");
     } catch (e) {
         console.log("Notes: Failed to archive email: " + e.message);

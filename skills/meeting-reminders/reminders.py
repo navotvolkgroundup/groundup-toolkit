@@ -8,12 +8,10 @@ Enhanced with HubSpot context
 import os
 import sys
 import json
-import shlex
 import subprocess
 import sqlite3
 import fcntl
 import time
-import tempfile
 import requests
 from datetime import datetime, timedelta
 import pytz
@@ -23,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from lib.config import config
 from lib.whatsapp import send_whatsapp
 from lib.email import send_email
+from lib.gws import gws_calendar_events, gws_gmail_send
 from lib.hubspot import (
     search_company as _search_company, get_deals_for_company,
     get_latest_note as _get_latest_note
@@ -39,7 +38,6 @@ except ImportError:
     ENRICHMENT_AVAILABLE = False
 
 WHATSAPP_ACCOUNT = config.whatsapp_account
-GOG_ACCOUNT = config.assistant_email
 
 # Persistent database path (survives reboots, unlike /tmp)
 _TOOLKIT_ROOT = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -123,50 +121,11 @@ class ReminderDatabase:
         conn.close()
 
 
-def run_gog_command(cmd):
-    """Run gog command with keyring password.
-
-    Uses shell=False with argument list to prevent secrets from appearing
-    in shell command strings (which could leak into logs or ps output).
-    """
-    env = os.environ.copy()
-    env['GOG_KEYRING_PASSWORD'] = os.environ.get("GOG_KEYRING_PASSWORD", "")
-    cmd_args = ['gog'] + shlex.split(cmd) + ['--account', GOG_ACCOUNT, '--json']
-
-    try:
-        result = subprocess.run(
-            cmd_args,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-        )
-
-        if result.returncode != 0:
-            print(f"Error running gog command: {result.stderr}", file=sys.stderr)
-            return None
-
-        if result.stdout:
-            return json.loads(result.stdout)
-        return {}
-    except Exception as e:
-        print(f"Exception running gog command: {e}", file=sys.stderr)
-        return None
-
-
 def get_upcoming_events(email, start_time, end_time):
-    """Get calendar events in time range"""
-    # Format times for gog (RFC3339 format)
-    start_str = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
-    end_str = end_time.strftime('%Y-%m-%dT%H:%M:%SZ')
-
-    cmd = f'calendar events {email} --from "{start_str}" --to "{end_str}" --max 50'
-    result = run_gog_command(cmd)
-
-    if not result or 'events' not in result:
-        return []
-
-    return result['events']
+    """Get calendar events in time range via gws-auth."""
+    time_min = start_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    time_max = end_time.strftime('%Y-%m-%dT%H:%M:%SZ')
+    return gws_calendar_events(email, time_min, time_max, max_results=50)
 
 
 def format_meeting_time(start_time_str, timezone_str):
@@ -192,7 +151,6 @@ def send_whatsapp_message(phone, message, max_retries=3, retry_delay=3):
 def send_email_fallback(to_email, name, message):
     """Fallback: send meeting reminder via email when WhatsApp is down"""
     try:
-        import tempfile
         subject = f"Meeting Reminder"
         # Extract meeting name from first line if possible
         first_line = message.split('\n')[0] if message else ''
@@ -203,30 +161,11 @@ def send_email_fallback(to_email, name, message):
 
         body = f"Hi {name},\n\n{message}\n\n-- {config.assistant_name} (sent via email because WhatsApp was unavailable)"
 
-        # Write body to temp file to avoid shell escaping issues
-        fd, body_file = tempfile.mkstemp(suffix='.txt', prefix='reminder-email-')
-        with os.fdopen(fd, 'w') as f:
-            f.write(body)
-
-        cmd = [
-            'gog', 'gmail', 'send',
-            '--to', to_email,
-            '--subject', subject,
-            '--body-file', body_file,
-            '--account', GOG_ACCOUNT,
-            '--force', '--no-input'
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        try:
-            os.unlink(body_file)
-        except OSError:
-            pass
-
-        if result.returncode == 0:
+        if gws_gmail_send(to_email, subject, body):
             print(f"  ✓ Email fallback sent to {to_email}")
             return True
         else:
-            print(f"  ✗ Email fallback failed for {to_email}: {result.stderr.strip()[:200]}", file=sys.stderr)
+            print(f"  ✗ Email fallback failed for {to_email}", file=sys.stderr)
             return False
     except Exception as e:
         print(f"  ✗ Email fallback exception for {to_email}: {e}", file=sys.stderr)

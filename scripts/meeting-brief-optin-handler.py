@@ -5,16 +5,16 @@ Team members can send "opt in" or "opt out" to control meeting briefs
 """
 import os
 import sys
-import shlex
 import subprocess
 import tempfile
 import re
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.expanduser('~/.openclaw'))
 from lib.config import config
+from lib.gws import gws_gmail_search, gws_gmail_thread_get, gws_gmail_modify, gws_gmail_send
 
-GOG_ACCOUNT = config.assistant_email
 WHATSAPP_ACCOUNT = os.environ.get("WHATSAPP_ACCOUNT", "main")
 SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meeting-brief-automation.py")
 PROCESSED_LABEL = "MeetingBrief-Processed"
@@ -29,31 +29,6 @@ for m in config.team_members:
 
 # Reverse lookup: phone -> email
 PHONE_TO_EMAIL = {member['phone']: email for email, member in TEAM_MEMBERS.items()}
-
-def _gog_env():
-    env = os.environ.copy()
-    env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-    return env
-
-def _run_gog(args, json_output=True):
-    """Run a gog command safely without shell."""
-    cmd = ['gog'] + args + ['--account', GOG_ACCOUNT]
-    if json_output:
-        cmd.append('--json')
-    result = subprocess.run(cmd, capture_output=True, text=True, env=_gog_env())
-    if result.returncode != 0:
-        print(f"Error running gog: {result.stderr[:200]}", file=sys.stderr)
-        return None
-    if json_output:
-        try:
-            return json.loads(result.stdout)
-        except Exception:
-            return result.stdout
-    return result
-
-def run_gog_command(cmd):
-    args = shlex.split(cmd)
-    return _run_gog(args)
 
 def get_current_status(email):
     """Read current opt-in status from script"""
@@ -99,31 +74,12 @@ def send_whatsapp(phone, message):
     return result.returncode == 0
 
 def send_email(to_email, subject, body):
-    """Send email via gog"""
-    fd, body_path = tempfile.mkstemp(suffix='.txt', prefix='optin-email-')
-    try:
-        with os.fdopen(fd, 'w') as f:
-            f.write(body)
-        result = _run_gog([
-            'gmail', 'send',
-            '--to', to_email,
-            '--subject', subject,
-            '--body-file', body_path,
-        ], json_output=False)
-        return result is not None and result.returncode == 0
-    finally:
-        try:
-            os.unlink(body_path)
-        except OSError:
-            pass
+    """Send email via gws"""
+    return bool(gws_gmail_send(to_email, subject, body))
 
 def mark_email_processed(thread_id):
     """Mark email as processed"""
-    result = _run_gog([
-        'gmail', 'thread', 'modify', thread_id,
-        '--add', PROCESSED_LABEL, '--remove', 'UNREAD,INBOX', '--force',
-    ], json_output=False)
-    return result is not None and result.returncode == 0
+    return bool(gws_gmail_modify(thread_id, add_labels=[PROCESSED_LABEL], remove_labels=['UNREAD', 'INBOX']))
 
 def check_whatsapp_messages():
     """Check for WhatsApp opt-in/opt-out messages"""
@@ -145,36 +101,41 @@ def check_email_requests():
     team_emails = ' OR '.join([f'from:{email}' for email in TEAM_MEMBERS.keys()])
     query = f'in:inbox -{PROCESSED_LABEL} ({team_emails}) (subject:"meeting brief" OR body:"meeting brief") newer_than:1d'
 
-    result = run_gog_command(f'gmail search "{query}" --limit 10')
+    raw_threads = gws_gmail_search(query, max_results=10)
 
-    if not result or 'threads' not in result:
+    if not raw_threads:
         print("  No requests found")
         return []
 
-    threads = result.get('threads', [])
-    if not threads:
-        print("  No requests found")
-        return []
-
-    print(f"  Found {len(threads)} potential requests")
+    print(f"  Found {len(raw_threads)} potential requests")
 
     processed = []
 
-    for thread in threads:
-        from_email = thread.get('from', '')
-        subject = thread.get('subject', '')
-        thread_id = thread.get('id', '')
+    for t in raw_threads:
+        thread_id = t.get('id', '')
+
+        # Get full thread details (gws search only returns id/snippet)
+        thread_details = gws_gmail_thread_get(thread_id)
+        if not thread_details or 'messages' not in thread_details:
+            continue
+
+        # Extract from/subject from first message headers
+        first_msg = thread_details['messages'][0]
+        headers = first_msg.get('payload', {}).get('headers', [])
+        from_email = ''
+        subject = ''
+        for h in headers:
+            name = h.get('name', '').lower()
+            if name == 'from':
+                from_email = h.get('value', '')
+            elif name == 'subject':
+                subject = h.get('value', '')
 
         # Extract sender email
         sender_match = re.search(r'<(.+?)>', from_email)
         sender_email = sender_match.group(1) if sender_match else from_email
 
         if sender_email not in TEAM_MEMBERS:
-            continue
-
-        # Get thread details to check body
-        thread_details = run_gog_command(f'gmail thread get {thread_id}')
-        if not thread_details or 'messages' not in thread_details:
             continue
 
         # Check subject and body for opt-in/opt-out
@@ -201,11 +162,11 @@ def check_email_requests():
         if opt_in and not current_status:
             # Opt in
             set_opt_in(sender_email, True)
-            print(f"  ✅ Opted in: {member['name']} ({sender_email})")
+            print(f"  Opted in: {member['name']} ({sender_email})")
 
             confirmation = f"""Hi {member['name']},
 
-You've been successfully opted in to Smart Meeting Briefs! 🎉
+You've been successfully opted in to Smart Meeting Briefs!
 
 You'll now receive intelligent meeting prep via WhatsApp 10 minutes before each meeting, including:
 - HubSpot deal context
@@ -213,19 +174,19 @@ You'll now receive intelligent meeting prep via WhatsApp 10 minutes before each 
 - Attendee information
 - Recent notes
 
-Make sure your calendar is shared with {GOG_ACCOUNT} to receive briefs.
+Make sure your calendar is shared with {config.assistant_email} to receive briefs.
 
 To opt out anytime, just email: "opt out of meeting briefs"
 
 - Meeting Brief Bot"""
 
-            send_email(sender_email, "✅ Meeting Briefs - Opted In", confirmation)
+            send_email(sender_email, "Meeting Briefs - Opted In", confirmation)
             processed.append(f"{member['name']} opted in")
 
         elif opt_out and current_status:
             # Opt out
             set_opt_in(sender_email, False)
-            print(f"  ❌ Opted out: {member['name']} ({sender_email})")
+            print(f"  Opted out: {member['name']} ({sender_email})")
 
             confirmation = f"""Hi {member['name']},
 
@@ -241,13 +202,13 @@ You won't receive any more meeting prep messages. You can opt back in anytime by
         else:
             # Already in desired state
             action = "opted in" if current_status else "opted out"
-            print(f"  ℹ️  {member['name']} already {action}")
+            print(f"  {member['name']} already {action}")
 
             confirmation = f"""Hi {member['name']},
 
 You're already {"opted in to" if current_status else "opted out of"} Smart Meeting Briefs.
 
-Current status: {"✅ Receiving briefs" if current_status else "❌ Not receiving briefs"}
+Current status: {"Receiving briefs" if current_status else "Not receiving briefs"}
 
 - Meeting Brief Bot"""
 

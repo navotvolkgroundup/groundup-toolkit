@@ -7,8 +7,6 @@
 #   ASSISTANT_WHATSAPP_PHONE - Phone number of the assistant (WhatsApp target)
 #   ALERT_PHONE              - Phone number to call/alert on failure
 #   ALERT_EMAIL              - Email address for alert notifications
-#   GOG_ACCOUNT              - Google account used to send alert emails
-#   GOG_KEYRING_PASSWORD     - Keyring password for GOG authentication
 #   TWILIO_ACCOUNT_SID       - Twilio account SID (optional, for call alerts)
 #   TWILIO_API_KEY_SID       - Twilio API key SID (optional)
 #   TWILIO_API_KEY_SECRET    - Twilio API key secret (optional)
@@ -26,7 +24,6 @@ TIMESTAMP=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 ASSISTANT_PHONE="${ASSISTANT_WHATSAPP_PHONE:-+1234567890}"
 ALERT_PHONE="${ALERT_PHONE:-+1234567890}"
 ALERT_EMAIL="${ALERT_EMAIL:-admin@yourcompany.com}"
-GOG_ACCOUNT="${GOG_ACCOUNT:-assistant@yourcompany.com}"
 _WATCHDOG_STATE_DIR="$HOME/.groundup-toolkit/state"
 mkdir -p "$_WATCHDOG_STATE_DIR" 2>/dev/null && chmod 700 "$_WATCHDOG_STATE_DIR" 2>/dev/null || true
 STATE_FILE="$_WATCHDOG_STATE_DIR/whatsapp-watchdog-state"
@@ -99,11 +96,11 @@ send_alert() {
         trap - EXIT
     fi
 
-    # Also send email alert (GOG_KEYRING_PASSWORD is already in env from .env source)
-    gog gmail send --to "$ALERT_EMAIL" \
+    # Also send email alert
+    gws-auth gmail +send --to "$ALERT_EMAIL" \
         --subject "Assistant WhatsApp is DOWN - QR scan needed" \
         --body "WhatsApp failed the send test and could not auto-recover after gateway restart. SSH to the server and run: openclaw channels login" \
-        --account "$GOG_ACCOUNT" --force --no-input 2>/dev/null || true
+        2>/dev/null || true
 
     echo "$now" > "$STATE_FILE"
     log "Alert sent (call + email)"

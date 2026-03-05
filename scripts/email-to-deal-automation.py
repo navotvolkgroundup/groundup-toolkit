@@ -2,7 +2,6 @@
 import os
 import sys
 import json
-import shlex
 import subprocess
 import tempfile
 import requests
@@ -16,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.expanduser('~/.openclaw'))
 from lib.config import config
 from lib.safe_url import is_safe_url
+from lib.gws import gws_gmail_search, gws_gmail_thread_get, gws_gmail_modify, gws_gmail_send, gws_gmail_attachment_download
 
 ANTHROPIC_API_KEY = config.anthropic_api_key
 
@@ -25,8 +25,6 @@ OWNER_IDS = {m['email']: m.get('hubspot_owner_id', '') for m in config.team_memb
 
 MATON_API_KEY = config.maton_api_key
 MATON_BASE_URL = 'https://gateway.maton.ai/hubspot'
-GOG_ACCOUNT = config.assistant_email
-
 # Pipeline config from config.yaml
 DEFAULT_PIPELINE = config.hubspot_default_pipeline
 DEFAULT_STAGE = config.hubspot_deal_stage
@@ -53,54 +51,44 @@ _STATE_DIR = os.path.expanduser("~/.groundup-toolkit/state")
 os.makedirs(_STATE_DIR, mode=0o700, exist_ok=True)
 DEAL_ANALYZER_STATE = os.path.join(_STATE_DIR, "deal-analyzer-state.json")
 
-def _gog_env():
-    """Get environment with GOG keyring password set."""
-    env = os.environ.copy()
-    env['GOG_KEYRING_PASSWORD'] = config.gog_keyring_password
-    return env
-
-def _run_gog(args, json_output=True):
-    """Run a gog command safely without shell=True.
-
-    Args:
-        args: list of arguments after 'gog', e.g. ['gmail', 'search', query, '--limit', '20']
-        json_output: if True, append --json and parse output as JSON
-    """
-    cmd = ['gog'] + args + ['--account', GOG_ACCOUNT]
-    if json_output:
-        cmd.append('--json')
-    result = subprocess.run(cmd, capture_output=True, text=True, env=_gog_env())
-    if result.returncode != 0:
-        print(f'Error running gog: {result.stderr[:200]}', file=sys.stderr)
-        return None
-    if json_output:
-        try:
-            return json.loads(result.stdout)
-        except Exception:
-            return result.stdout
-    return result
-
-def run_gog_command(cmd):
-    """Legacy wrapper — parses a command string into args for _run_gog."""
-    args = shlex.split(cmd)
-    return _run_gog(args)
-
 def check_recent_emails():
     print(f'[{datetime.now()}] Checking for new emails...')
     team_emails = ' OR '.join([f'from:{email}' for email in TEAM_MEMBERS.keys()])
     query = f'in:inbox -{PROCESSED_LABEL} ({team_emails}) newer_than:2h'
-    result = run_gog_command(f'gmail search "{query}" --limit 20')
-    if not result or 'threads' not in result:
+    threads = gws_gmail_search(query, max_results=20)
+    if not threads:
         return []
-    return result['threads']
+    # Enrich with from/subject from message headers (gws search only returns id/snippet)
+    enriched = []
+    for t in threads:
+        thread_id = t.get('id', '')
+        detail = gws_gmail_thread_get(thread_id)
+        if not detail or 'messages' not in detail:
+            continue
+        first_msg = detail['messages'][0]
+        headers = first_msg.get('payload', {}).get('headers', [])
+        from_val = ''
+        subject_val = ''
+        for h in headers:
+            name = h.get('name', '').lower()
+            if name == 'from':
+                from_val = h.get('value', '')
+            elif name == 'subject':
+                subject_val = h.get('value', '')
+        enriched.append({
+            'id': thread_id,
+            'from': from_val,
+            'subject': subject_val,
+            'snippet': t.get('snippet', ''),
+        })
+    return enriched
 
 def get_email_body(thread_id):
     """Get email body to check for LP mentions"""
-    result = run_gog_command(f'gmail thread get {thread_id}')
-    if result and 'messages' in result:
-        for msg in result['messages']:
-            body = msg.get('snippet', '')
-            return body
+    detail = gws_gmail_thread_get(thread_id)
+    if detail and 'messages' in detail:
+        for msg in detail['messages']:
+            return msg.get('snippet', '')
     return ''
 
 def is_lp_email(subject, body):
@@ -254,46 +242,25 @@ View deal: {deal_url}
 - Deal Automation Bot
 """
 
-    body_fd, body_path = tempfile.mkstemp(suffix='.txt', prefix='email-body-')
-    try:
-        with os.fdopen(body_fd, 'w') as f:
-            f.write(message)
-        result = _run_gog([
-            'gmail', 'send',
-            '--to', to_email,
-            '--subject', f'Deal Created: {company_name}',
-            '--body-file', body_path,
-        ], json_output=False)
-        if result and result.returncode == 0:
-            print(f'Sent confirmation email to {to_email}')
-            return True
-        else:
-            print(f'Error sending confirmation', file=sys.stderr)
-            return False
-    finally:
-        try:
-            os.unlink(body_path)
-        except OSError:
-            pass
+    if gws_gmail_send(to_email, f'Deal Created: {company_name}', message):
+        print(f'Sent confirmation email to {to_email}')
+        return True
+    else:
+        print(f'Error sending confirmation', file=sys.stderr)
+        return False
 
 def mark_email_processed(thread_id):
     """Add processed label, mark as read, and archive - with fallback if label fails"""
-    result = _run_gog([
-        'gmail', 'thread', 'modify', thread_id,
-        '--add', PROCESSED_LABEL, '--remove', 'UNREAD,INBOX', '--force',
-    ], json_output=False)
+    result = gws_gmail_modify(thread_id, add_labels=[PROCESSED_LABEL], remove_labels=['UNREAD', 'INBOX'])
 
-    if result and result.returncode == 0:
+    if result:
         print(f'Marked email as processed and archived')
         return True
     else:
         print(f'Warning: Could not add label, archiving anyway', file=sys.stderr)
-        fallback = _run_gog([
-            'gmail', 'thread', 'modify', thread_id,
-            '--remove', 'UNREAD,INBOX', '--force',
-        ], json_output=False)
+        fallback = gws_gmail_modify(thread_id, remove_labels=['UNREAD', 'INBOX'])
 
-        if fallback and fallback.returncode == 0:
+        if fallback:
             print(f'Archived email (without label)')
             return True
         else:
@@ -532,33 +499,38 @@ def check_optin_optout_requests():
     team_emails = ' OR '.join([f'from:{email}' for email in TEAM_MEMBERS.keys()])
     query = f'in:inbox -{OPTIN_LABEL} ({team_emails}) (subject:"meeting brief" OR body:"meeting brief") newer_than:1d'
 
-    result = run_gog_command(f'gmail search "{query}" --limit 10')
+    raw_threads = gws_gmail_search(query, max_results=10)
 
-    if not result or 'threads' not in result:
+    if not raw_threads:
         print('  No opt-in/out requests')
         return
 
-    threads = result.get('threads', [])
-    if not threads:
-        print('  No opt-in/out requests')
-        return
+    print(f'  Found {len(raw_threads)} potential requests')
 
-    print(f'  Found {len(threads)} potential requests')
+    for t in raw_threads:
+        thread_id = t.get('id', '')
 
-    for thread in threads:
-        from_email = thread.get('from', '')
-        subject = thread.get('subject', '')
-        thread_id = thread.get('id', '')
+        # Get full thread details (gws search only returns id/snippet)
+        thread_details = gws_gmail_thread_get(thread_id)
+        if not thread_details or 'messages' not in thread_details:
+            continue
+
+        # Extract from/subject from first message headers
+        first_msg = thread_details['messages'][0]
+        headers = first_msg.get('payload', {}).get('headers', [])
+        from_email = ''
+        subject = ''
+        for h in headers:
+            name = h.get('name', '').lower()
+            if name == 'from':
+                from_email = h.get('value', '')
+            elif name == 'subject':
+                subject = h.get('value', '')
 
         sender_match = re.search(r'<(.+?)>', from_email)
         sender_email = sender_match.group(1) if sender_match else from_email
 
         if sender_email not in TEAM_MEMBERS:
-            continue
-
-        # Get thread body
-        thread_details = run_gog_command(f'gmail thread get {thread_id}')
-        if not thread_details or 'messages' not in thread_details:
             continue
 
         body = ""
@@ -649,28 +621,13 @@ To opt back in: email "opt in to meeting briefs"
             print(f'  Error processing opt-in/out: {e}', file=sys.stderr)
 
 def send_email_simple(to_email, subject, body):
-    """Send email via gog (simple version)"""
-    body_fd, body_path = tempfile.mkstemp(suffix='.txt', prefix='email-body-')
-    try:
-        with os.fdopen(body_fd, 'w') as f:
-            f.write(body)
-        result = _run_gog([
-            'gmail', 'send',
-            '--to', to_email,
-            '--subject', subject,
-            '--body-file', body_path,
-        ], json_output=False)
-        if result and result.returncode == 0:
-            print(f'    Sent confirmation email to {to_email}')
-            return True
-        else:
-            print(f'    Error sending email', file=sys.stderr)
-            return False
-    finally:
-        try:
-            os.unlink(body_path)
-        except OSError:
-            pass
+    """Send email via gws"""
+    if gws_gmail_send(to_email, subject, body):
+        print(f'    Sent confirmation email to {to_email}')
+        return True
+    else:
+        print(f'    Error sending email', file=sys.stderr)
+        return False
 
 def extract_deck_links(text):
     """Extract deck links from email body"""
@@ -1138,13 +1095,13 @@ def should_skip_email(subject, body):
 
 def get_email_attachments(thread_id):
     """Get list of PDF/PPTX attachments from email"""
-    result = run_gog_command(f'gmail thread get {thread_id}')
-    if not result:
+    detail = gws_gmail_thread_get(thread_id)
+    if not detail:
         return []
 
     attachments = []
     try:
-        messages = result.get('thread', {}).get('messages', [])
+        messages = detail.get('messages', [])
         for message in messages:
             payload = message.get('payload', {})
             parts = payload.get('parts', [])
@@ -1181,12 +1138,7 @@ def download_attachment(message_id, attachment_id, filename):
             print(f'  Security: rejected suspicious filename: {filename}', file=sys.stderr)
             return None
 
-        result = _run_gog([
-            'gmail', 'attachment', message_id, attachment_id,
-            '--out', output_path,
-        ], json_output=False)
-
-        if result and result.returncode == 0 and os.path.exists(output_path):
+        if gws_gmail_attachment_download(message_id, attachment_id, output_path):
             return output_path
         else:
             print(f'  Error downloading attachment', file=sys.stderr)

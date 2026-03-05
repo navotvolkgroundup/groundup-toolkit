@@ -9,7 +9,6 @@ extracts action items with Claude AI, and emails summaries to the team.
 import os
 import sys
 import json
-import shlex
 import subprocess
 import tempfile
 from datetime import datetime, timedelta
@@ -18,25 +17,14 @@ import requests
 # Load toolkit config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from lib.config import config
+from lib.gws import gws_drive_search, gws_drive_download, gws_gmail_send_bodyfile
 
 # Configuration
-GOG_ACCOUNT = config.assistant_email
 ANTHROPIC_API_KEY = config.anthropic_api_key
 PROCESSED_MEETINGS_FILE = os.path.expanduser('~/.processed-meetings.json')
 
 TEAM_MEMBERS = {m['email']: m['name'].split()[0] for m in config.team_members}
 
-def run_gog_command(cmd):
-    """Run gog command with authentication"""
-    cmd_list = ['gog'] + shlex.split(cmd) + ['--account', GOG_ACCOUNT, '--json']
-    result = subprocess.run(cmd_list, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f'Error running gog: {result.stderr}')
-        return None
-    try:
-        return json.loads(result.stdout)
-    except Exception:
-        return result.stdout
 
 def load_processed_meetings():
     """Load list of processed meetings"""
@@ -74,17 +62,17 @@ def find_meeting_recordings():
     print('  🔍 Searching for meeting recordings in Google Drive...')
     
     # Search for video files from last 7 days
-    result = run_gog_command('drive search "mimeType: \'video\'" --max 50')
-    
-    if not result or 'files' not in result:
+    files = gws_drive_search("mimeType='video/mp4' or mimeType='video/webm'", page_size=50)
+
+    if not files:
         print('  ℹ️  No recordings found')
         return []
-    
+
     recordings = []
     now = datetime.now()
     cutoff = now - timedelta(days=7)
-    
-    for file in result['files']:
+
+    for file in files:
         try:
             # Parse created time
             created_str = file.get('createdTime', '')
@@ -122,15 +110,15 @@ def get_transcript_from_recording(recording_id, recording_name):
     # Search for associated transcript file (Google Meet creates .sbv or .vtt files)
     base_name = recording_name.rsplit('.', 1)[0]  # Remove extension
     
-    result = run_gog_command(f'drive search "name: \'{base_name}\'" --max 20')  # base_name from Drive API, not user input
-    
-    if not result or 'files' not in result:
+    files = gws_drive_search(f"name contains '{base_name}'", page_size=20)
+
+    if not files:
         print('  ℹ️  No transcript file found')
         return None
-    
+
     # Look for transcript files (.sbv, .vtt, or .txt)
     transcript_file = None
-    for file in result['files']:
+    for file in files:
         name = file.get('name', '').lower()
         if any(ext in name for ext in ['.sbv', '.vtt', '.txt', 'transcript']):
             transcript_file = file
@@ -144,11 +132,8 @@ def get_transcript_from_recording(recording_id, recording_name):
     transcript_path = f'/tmp/transcript-{transcript_file["id"]}.txt'
     
     try:
-        download_cmd = ['gog', 'drive', 'download', transcript_file['id'], '--out', transcript_path, '--account', GOG_ACCOUNT]
-        result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=120)
-        
-        if result.returncode != 0:
-            print(f'  ❌ Download failed: {result.stderr}')
+        if not gws_drive_download(transcript_file['id'], transcript_path, mime_type=transcript_file.get('mimeType')):
+            print(f'  ❌ Download failed')
             return None
         
         with open(transcript_path, 'r', encoding='utf-8') as f:
@@ -244,31 +229,13 @@ Here's the summary from {meeting_name} recorded on {meeting_date}:
 Processed by {config.assistant_name}'s Meeting Bot
 """
 
-    body_fd, body_path = tempfile.mkstemp(suffix='.txt', prefix='meeting-summary-')
-    try:
-        with os.fdopen(body_fd, 'w') as f:
-            f.write(body)
-
-        cmd = ['gog', 'gmail', 'send', '--to', admin_email, '--subject', subject,
-               '--body-file', body_path, '--account', GOG_ACCOUNT]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-        if result.returncode == 0:
-            print(f'  ✅ Email sent to {admin_email}')
-            return True
-        else:
-            print(f'  ❌ Email failed: {result.stderr}')
-            return False
-
-    except Exception as e:
-        print(f'  ❌ Error sending email: {e}')
+    from lib.gws import gws_gmail_send
+    if gws_gmail_send(admin_email, subject, body):
+        print(f'  ✅ Email sent to {admin_email}')
+        return True
+    else:
+        print(f'  ❌ Email failed')
         return False
-    finally:
-        try:
-            os.unlink(body_path)
-        except OSError:
-            pass
 
 def main():
     """Main entry point"""

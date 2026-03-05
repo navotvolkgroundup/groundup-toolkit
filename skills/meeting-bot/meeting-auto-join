@@ -12,7 +12,6 @@ import os
 import sys
 import json
 import fcntl
-import shlex
 import subprocess
 import re
 from datetime import datetime, timedelta, timezone
@@ -20,8 +19,7 @@ from datetime import datetime, timedelta, timezone
 # Load shared config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from lib.config import config
-
-GOG_ACCOUNT = config.meeting_bot_account
+from lib.gws import gws_calendar_events
 JOINED_FILE = os.path.expanduser("~/.bot-joined-meetings.json")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 JOIN_SCRIPT = os.path.join(SCRIPT_DIR, "camofox-join.js")
@@ -77,21 +75,11 @@ def _load_env():
 def get_upcoming_meetings():
     """Get meetings starting in the next 5 minutes"""
     _load_env()
-    cmd = ['gog', 'calendar', 'events', '--today', '--account', GOG_ACCOUNT, '--json']
-    try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode != 0:
-            log(f"gog error: {result.stderr.strip()}")
-            return []
-        data = json.loads(result.stdout)
-    except Exception as e:
-        log(f"Failed to get calendar: {e}")
-        return []
-
-    events = data.get("events", [])
+    calendar_id = config.meeting_bot_account
     now = datetime.now(timezone.utc)
+    time_min = now.replace(hour=0, minute=0, second=0).strftime('%Y-%m-%dT%H:%M:%SZ')
+    time_max = now.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%dT%H:%M:%SZ')
+    events = gws_calendar_events(calendar_id, time_min, time_max)
     window_start = now - timedelta(minutes=2)
     window_end = now + timedelta(minutes=5)
 

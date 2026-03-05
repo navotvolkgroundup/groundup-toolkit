@@ -5,8 +5,6 @@
 #
 # Required environment variables (set in .env):
 #   ALERT_EMAIL     - Email address for alert notifications
-#   GOG_ACCOUNT     - Google account used to send alert emails
-#   GOG_KEYRING_PASSWORD - Keyring password for GOG authentication
 
 set +e
 
@@ -22,7 +20,6 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 
 TIMESTAMP=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 ALERT_EMAIL="${ALERT_EMAIL:-admin@yourcompany.com}"
-GOG_ACCOUNT="${GOG_ACCOUNT:-assistant@yourcompany.com}"
 ALERT_STATE_DIR="$HOME/.groundup-toolkit/state/health-alerts"
 mkdir -p "$ALERT_STATE_DIR"
 chmod 700 "$HOME/.groundup-toolkit/state" 2>/dev/null || true
@@ -57,9 +54,7 @@ send_alert() {
         return
     fi
 
-    . ~/.profile 2>/dev/null || true
-    export GOG_KEYRING_PASSWORD="${GOG_KEYRING_PASSWORD}"
-    gog gmail send --to "$ALERT_EMAIL" --subject "$subject" --body "$body" --account "$GOG_ACCOUNT" 2>/dev/null || true
+    gws-auth gmail +send --to "$ALERT_EMAIL" --subject "$subject" --body "$body" 2>/dev/null || true
     echo "$TIMESTAMP" > "$state_file"
     log "Alert email sent to $ALERT_EMAIL"
 }
@@ -69,9 +64,7 @@ clear_alert() {
     local state_file="$ALERT_STATE_DIR/$key"
     if [ -f "$state_file" ]; then
         rm -f "$state_file"
-        . ~/.profile 2>/dev/null || true
-        export GOG_KEYRING_PASSWORD="${GOG_KEYRING_PASSWORD}"
-        gog gmail send --to "$ALERT_EMAIL" --subject "RECOVERED: $key" --body "The $key issue on $(hostname) has recovered at $TIMESTAMP." --account "$GOG_ACCOUNT" 2>/dev/null || true
+        gws-auth gmail +send --to "$ALERT_EMAIL" --subject "RECOVERED: $key" --body "The $key issue on $(hostname) has recovered at $TIMESTAMP." 2>/dev/null || true
         log "Recovery email sent for '$key'"
     fi
 }

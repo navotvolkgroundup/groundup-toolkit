@@ -33,8 +33,7 @@ from lib.brave import brave_search
 from lib.whatsapp import send_whatsapp
 from lib.email import send_email
 from lib.hubspot import search_company as _search_company, add_note as _add_note
-
-GOG_ACCOUNT = config.assistant_email
+from lib.gws import get_google_access_token
 
 # --- Constants ---
 _STATE_DIR = os.path.expanduser("~/.groundup-toolkit/state")
@@ -46,50 +45,7 @@ DEMO_STATE_FILE = os.path.join(_STATE_DIR, "deal-analyzer-demo.json")
 
 
 # --- Google Docs ---
-
-GOG_CREDENTIALS_PATH = os.path.expanduser("~/.config/gogcli/credentials.json")
-
-
-def get_google_access_token():
-    """Get a Google OAuth2 access token using gog's stored credentials."""
-    try:
-        with open(GOG_CREDENTIALS_PATH) as f:
-            creds = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"  Could not read gog credentials: {e}", file=sys.stderr)
-        return None
-
-    fd, token_path = tempfile.mkstemp(suffix='.json', prefix='gog-token-')
-    os.close(fd)
-    try:
-        result = subprocess.run(
-            ['gog', 'auth', 'tokens', 'export', GOG_ACCOUNT,
-             '--out', token_path, '--overwrite', '--no-input'],
-            capture_output=True, text=True, timeout=15
-        )
-        if result.returncode != 0:
-            print(f"  gog token export failed", file=sys.stderr)
-            return None
-
-        token_data = json.load(open(token_path))
-    finally:
-        try:
-            os.unlink(token_path)
-        except OSError:
-            pass
-
-    response = requests.post('https://oauth2.googleapis.com/token', data={
-        'client_id': creds['client_id'],
-        'client_secret': creds['client_secret'],
-        'refresh_token': token_data['refresh_token'],
-        'grant_type': 'refresh_token',
-    }, timeout=10)
-
-    if response.status_code == 200:
-        return response.json()['access_token']
-
-    print(f"  Token exchange failed: HTTP {response.status_code}", file=sys.stderr)
-    return None
+# get_google_access_token imported from lib/gws
 
 
 def html_escape(text):

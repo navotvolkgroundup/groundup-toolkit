@@ -19,7 +19,6 @@ import sys
 import os
 import re
 import json
-import shlex
 import time
 import fcntl
 import sqlite3
@@ -35,6 +34,7 @@ from lib.claude import call_claude
 from lib.brave import brave_search
 from lib.whatsapp import send_whatsapp
 from lib.email import send_email
+from lib.gws import gws_gmail_search, gws_gmail_thread_get, gws_gmail_modify
 from lib.hubspot import (
     fetch_deals_by_stage, get_company_for_deal as _get_company_for_deal,
     update_deal_stage, add_note, search_company
@@ -43,7 +43,6 @@ from lib.hubspot import (
 # --- Configuration ---
 
 WHATSAPP_ACCOUNT = config.whatsapp_account
-GOG_ACCOUNT = config.assistant_email
 PORTAL_ID = config.hubspot_portal_id
 
 KEEP_ON_RADAR_STAGE = "1138024523"
@@ -349,40 +348,9 @@ def format_whatsapp_summary(owner_first_name, deals_with_research):
 
 # --- Gmail Polling ---
 
-def _gog_env():
-    env = os.environ.copy()
-    env['GOG_KEYRING_PASSWORD'] = os.environ.get("GOG_KEYRING_PASSWORD", "")
-    return env
-
-def _run_gog(args, json_output=True, timeout=30):
-    """Run a gog command safely without shell."""
-    cmd = ['gog'] + args + ['--account', GOG_ACCOUNT]
-    if json_output:
-        cmd.append('--json')
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_gog_env())
-        if result.returncode != 0:
-            return None
-        if json_output:
-            if result.stdout:
-                return json.loads(result.stdout)
-            return {}
-        return result
-    except Exception:
-        return None
-
-def run_gog_command(cmd):
-    """Legacy wrapper — parses command string into args."""
-    args = shlex.split(cmd)
-    return _run_gog(args)
-
-
 def mark_email_processed(thread_id):
     """Add processed label and archive."""
-    _run_gog([
-        'gmail', 'thread', 'modify', thread_id,
-        '--add', PROCESSED_LABEL, '--remove', 'UNREAD', '--force',
-    ], json_output=False, timeout=15)
+    gws_gmail_modify(thread_id, add_labels=[PROCESSED_LABEL], remove_labels=['UNREAD'])
 
 
 def get_owner_deal_names(owner_email):
@@ -511,39 +479,42 @@ def check_replies():
     team_emails = ' OR '.join([f'from:{email}' for email in TEAM_MEMBERS.keys()])
     query = f'in:inbox -{PROCESSED_LABEL} ({team_emails}) subject:"Keep on Radar" newer_than:7d'
 
-    result = run_gog_command(f'gmail search "{query}" --limit 20')
-    if not result or 'threads' not in result:
+    threads = gws_gmail_search(query, max_results=20)
+    if not threads:
         print("  No replies found.")
         return
 
-    threads = result.get('threads') or []
     print(f"  Found {len(threads)} thread(s) to check")
 
     for thread in threads:
         thread_id = thread.get('id', '')
-        from_raw = thread.get('from', '')
 
-        # Extract sender email
-        sender_match = re.search(r'<(.+?)>', from_raw)
-        sender_email = sender_match.group(1) if sender_match else from_raw
-        sender_email = sender_email.strip().lower()
+        # Get full thread to extract sender and messages
+        thread_detail = gws_gmail_thread_get(thread_id)
+        if not thread_detail or 'messages' not in thread_detail:
+            continue
+
+        messages = thread_detail.get('messages') or []
+        if len(messages) < 2:
+            continue  # No reply yet
+
+        # Extract sender from the latest message headers
+        latest_msg = messages[-1]
+        sender_email = ''
+        for header in latest_msg.get('payload', {}).get('headers', []):
+            if header.get('name', '').lower() == 'from':
+                from_raw = header.get('value', '')
+                sender_match = re.search(r'<(.+?)>', from_raw)
+                sender_email = (sender_match.group(1) if sender_match else from_raw).strip().lower()
+                break
 
         if sender_email not in TEAM_MEMBERS:
             continue
 
         member = TEAM_MEMBERS[sender_email]
 
-        # Get full thread
-        thread_detail = run_gog_command(f'gmail thread get {thread_id}')
-        if not thread_detail or 'messages' not in thread_detail:
-            continue
-
-        messages = thread_detail.get('messages', [])
-        if len(messages) < 2:
-            continue  # No reply yet
-
         # Get the latest reply
-        latest_body = messages[-1].get('snippet', '')
+        latest_body = latest_msg.get('snippet', '')
         if not latest_body:
             continue
 
