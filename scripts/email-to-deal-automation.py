@@ -154,21 +154,27 @@ def extract_company_info(thread):
     # Strip trailing punctuation and dangling separators
     company_name = re.sub(r'\s*[-–—:+,]\s*$', '', company_name).strip()
 
+    confident = bool(company_name and len(company_name) >= 3 and '?' not in company_name)
+
     # Fallback: extract company from recipient email domains in snippet
     snippet = thread.get('snippet', '')
-    if not company_name or len(company_name) < 3 or '?' in company_name:
+    if not confident:
         # Look for non-team email domains in snippet (e.g. amir@sayfin.ai → Sayfin)
         all_emails = re.findall(r'[\w.+-]+@([\w-]+)\.\w+', snippet)
         team_domain = config.team_domain.split('.')[0].lower()
         external_domains = [d for d in all_emails if d.lower() != team_domain and d.lower() not in ('gmail', 'yahoo', 'hotmail', 'outlook', 'google')]
         if external_domains:
             company_name = external_domains[0].capitalize()
+            confident = False  # Domain-based guess, needs verification
 
     # Fallback: ask Claude to extract company name from email content
-    if (not company_name or len(company_name) < 3 or '?' in company_name) and ANTHROPIC_API_KEY:
-        company_name = _extract_company_with_claude(subject, snippet) or company_name
+    if not confident and ANTHROPIC_API_KEY:
+        claude_name = _extract_company_with_claude(subject, snippet)
+        if claude_name:
+            company_name = claude_name
+            confident = False  # Claude guess, needs verification
 
-    return {'name': company_name, 'description': f'Created from email: {subject}'}
+    return {'name': company_name, 'confident': confident, 'description': f'Created from email: {subject}'}
 
 
 def _extract_company_with_claude(subject, snippet):
@@ -1371,6 +1377,7 @@ def process_email(thread):
             extracted_name = extract_company_name_from_analysis(analysis)
             if extracted_name:
                 company_data['name'] = extracted_name
+                company_data['confident'] = True  # Deck analysis is reliable
                 print(f'  Company name: {extracted_name}')
 
             # Update company description with deck analysis
@@ -1402,6 +1409,7 @@ def process_email(thread):
                         extracted_name = extract_company_name_from_analysis(analysis)
                         if extracted_name:
                             company_data['name'] = extracted_name
+                            company_data['confident'] = True  # Deck analysis is reliable
                             print(f'  Company name: {extracted_name}')
 
                         # Update company description with deck analysis
@@ -1464,6 +1472,17 @@ def process_email(thread):
         pipeline_name = PIPELINE_NAMES.get(pipeline_id, pipeline_id)
         stage_name = STAGE_NAMES.get(stage_id, stage_id)
         send_confirmation_email(sender_email, company_data['name'], pipeline_name, stage_name, deal_url)
+
+        # If company name isn't confident, ask sender to verify via WhatsApp
+        if not company_data.get('confident', True):
+            sender_name = TEAM_MEMBERS.get(sender_email, 'there')
+            sender_phone = EMAIL_TO_PHONE.get(sender_email)
+            if sender_phone:
+                send_whatsapp(sender_phone,
+                    f"Hey {sender_name}, I just logged a new deal from your email \"{subject}\".\n\n"
+                    f"I'm not 100% sure about the company name — I went with *{company_data['name']}*. "
+                    f"Is that right? If not, just reply with the correct name and I'll update it in HubSpot.")
+                print(f'  Sent company name verification to {sender_name} via WhatsApp')
 
         # Save state for manual full report request (user must explicitly ask)
         if analysis:
