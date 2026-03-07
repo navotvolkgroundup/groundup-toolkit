@@ -53,7 +53,9 @@ export async function POST(req: NextRequest) {
   }
 
   const session = await auth()
-  if (!session?.user?.email) {
+  const email = session?.user?.email
+  const name = session?.user?.name
+  if (!email || !email.endsWith("@groundup.vc")) {
     return new Response("Unauthorized", { status: 401 })
   }
 
@@ -70,15 +72,14 @@ export async function POST(req: NextRequest) {
   }
 
   // Build the message with user identity and optional service context
-  const userName = session.user.name || session.user.email
-  let prefix = `[Dashboard chat from ${userName} (${session.user.email})]`
+  let prefix = `[Dashboard chat from ${name || email} (${email})]`
   if (context && typeof context === "string") {
     prefix += `\n[Asking about the "${context}" service]`
   }
   const fullMessage = `${prefix}\n\n${message}`
 
   // Session ID per user — only alphanumeric, hyphens allowed
-  const emailSlug = session.user.email.replace(/[^a-zA-Z0-9]/g, "-")
+  const emailSlug = email.replace(/[^a-zA-Z0-9]/g, "-")
   const sessionId = `dashboard-${emailSlug}`
 
   try {
