@@ -42,28 +42,29 @@ export function DealFlowChart() {
           <AreaChart data={weeks}>
             <defs>
               <linearGradient id="dealGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                <stop offset="5%" stopColor="#818cf8" stopOpacity={0.4} />
+                <stop offset="95%" stopColor="#818cf8" stopOpacity={0.05} />
               </linearGradient>
             </defs>
             <XAxis
               dataKey="label"
-              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+              tick={{ fontSize: 10, fill: "#9ca3af" }}
               axisLine={false}
               tickLine={false}
             />
             <YAxis
-              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+              tick={{ fontSize: 10, fill: "#9ca3af" }}
               axisLine={false}
               tickLine={false}
               allowDecimals={false}
             />
             <Tooltip
               contentStyle={{
-                background: "hsl(var(--card))",
-                border: "1px solid hsl(var(--border))",
+                background: "#1c1c2e",
+                border: "1px solid #2e2e3e",
                 borderRadius: "8px",
                 fontSize: "12px",
+                color: "#e5e7eb",
               }}
               labelFormatter={(label) => `Week of ${label}`}
               formatter={(value) => [`${value} deals`, "Deals"]}
@@ -71,7 +72,7 @@ export function DealFlowChart() {
             <Area
               type="monotone"
               dataKey="count"
-              stroke="hsl(var(--primary))"
+              stroke="#818cf8"
               fill="url(#dealGradient)"
               strokeWidth={2}
             />

@@ -19,66 +19,96 @@ function parseSignals(): Signal[] {
   const signals: Signal[] = []
 
   try {
-    const lines = execSync('tail -n 300 /var/log/founder-scout.log 2>/dev/null || true', {
+    const lines = execSync('tail -n 500 /var/log/founder-scout.log 2>/dev/null || true', {
       encoding: "utf-8",
       timeout: 3000,
     }).split("\n")
 
+    let currentTimestamp: string | null = null
+    let currentVisitName: string | null = null
+
     for (const line of lines) {
-      if (!line.trim()) continue
-
-      // Extract timestamp
-      const tsMatch = line.match(/\[(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\]]*)\]/)
-      const timestamp = tsMatch ? new Date(tsMatch[1].replace(" ", "T") + (tsMatch[1].endsWith("Z") ? "" : "Z")).toISOString() : null
-      if (!timestamp) continue
-
-      // Determine signal strength
-      let strength: Signal["strength"] = "low"
-      const upper = line.toUpperCase()
-      if (upper.includes("HIGH") || upper.includes("STEALTH") || upper.includes("LEFT ROLE") || upper.includes("FOUNDING")) {
-        strength = "high"
-      } else if (upper.includes("MEDIUM") || upper.includes("EXPLORING") || upper.includes("OPEN TO")) {
-        strength = "medium"
+      // Track timestamp from header lines: [2026-03-05 07:00:01.756856]
+      const tsMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/)
+      if (tsMatch) {
+        currentTimestamp = new Date(tsMatch[1].replace(" ", "T") + "Z").toISOString()
+        currentVisitName = null
+        continue
       }
 
-      // Try to extract name and signal description
-      // Pattern: "Signal: Name - description" or "Detected: Name at Company"
-      let name = "Unknown"
-      let company = ""
-      let signal = line
+      if (!currentTimestamp) continue
+      const trimmed = line.trim()
 
-      const nameMatch = line.match(/(?:Signal|Detected|Profile|Found)[:\s]+([A-Z][a-z]+ [A-Z][a-z]+)/i)
-      if (nameMatch) name = nameMatch[1]
+      // Track "Visiting Name..." lines for RELEVANT context
+      const visitMatch = trimmed.match(/^\[\d+\/\d+\] Visiting (.+?)\.\.\./)
+      if (visitMatch) {
+        currentVisitName = visitMatch[1]
+        continue
+      }
 
-      const companyMatch = line.match(/(?:at|from|ex-|formerly)\s+([A-Z][A-Za-z0-9 ]+?)(?:\s*[-,.]|\s*$)/i)
-      if (companyMatch) company = companyMatch[1].trim()
+      // "RELEVANT: description" — confirmed relevant profile
+      const relevantMatch = trimmed.match(/^RELEVANT:\s*(.+)/)
+      if (relevantMatch && currentVisitName) {
+        const description = relevantMatch[1]
+        signals.push({
+          id: Math.abs(hashCode(currentVisitName + currentTimestamp)).toString(36),
+          name: currentVisitName,
+          company: extractCompany(description),
+          signal: description.slice(0, 200),
+          strength: getStrength(description),
+          timestamp: currentTimestamp,
+          source: "LinkedIn",
+        })
+        continue
+      }
 
-      // Clean up signal text
-      signal = line
-        .replace(/^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s*/, "")
-        .replace(/^[A-Za-z ]+:\s*/, "")
-        .trim()
+      // "Kept (positive signal): Name — description"
+      const keptMatch = trimmed.match(/^Kept \(positive signal\):\s*(.+?)\s*—\s*(.+)/)
+      if (keptMatch) {
+        signals.push({
+          id: Math.abs(hashCode(keptMatch[1] + currentTimestamp)).toString(36),
+          name: keptMatch[1],
+          company: extractCompany(keptMatch[2]),
+          signal: keptMatch[2].slice(0, 200),
+          strength: getStrength(keptMatch[2]),
+          timestamp: currentTimestamp,
+          source: "LinkedIn",
+        })
+        continue
+      }
 
-      if (signal.length < 10) continue
-
-      // Only include relevant signal lines
-      if (!/signal|detect|profile|found|scout|stealth|left|founding|exploring/i.test(line)) continue
-
-      signals.push({
-        id: Math.abs(hashCode(line)).toString(36),
-        name,
-        company,
-        signal: signal.slice(0, 200),
-        strength,
-        timestamp,
-        source: "LinkedIn",
-      })
+      // "Email sent to" or "WhatsApp sent" with relevant count
+      const resultMatch = trimmed.match(/^Scan complete: .+?(\d+) relevant/)
+      if (resultMatch) {
+        // Skip — summary line, not a signal
+        continue
+      }
     }
   } catch {
     // Ignore errors
   }
 
   return signals.sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 20)
+}
+
+function extractCompany(text: string): string {
+  // Look for "at Company" or "CEO of Company" patterns
+  const match = text.match(/(?:at|of|@)\s+(?:a\s+)?([A-Z][A-Za-z0-9.]+(?:\s+[A-Z][A-Za-z0-9.]+)?)/i)
+  if (match) return match[1].trim()
+  // Look for "stealth" mentions
+  if (/stealth/i.test(text)) return "Stealth"
+  return ""
+}
+
+function getStrength(text: string): Signal["strength"] {
+  const lower = text.toLowerCase()
+  if (lower.includes("stealth") || lower.includes("founding") || lower.includes("co-founder") || lower.includes("left") || lower.includes("exited")) {
+    return "high"
+  }
+  if (lower.includes("exploring") || lower.includes("open to") || lower.includes("next chapter") || lower.includes("building")) {
+    return "medium"
+  }
+  return "low"
 }
 
 function hashCode(str: string): number {
