@@ -6,6 +6,7 @@ import { Settings, Bell, Moon, Clock, User } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { useSession } from "next-auth/react"
 import { useState } from "react"
+import Image from "next/image"
 
 interface SettingsSection {
   title: string
@@ -63,7 +64,7 @@ export default function SettingsPage() {
           <Section title="Profile" icon={User}>
             <div className="flex items-center gap-4">
               {session?.user?.image && (
-                <img src={session.user.image} alt="" className="h-12 w-12 rounded-full" />
+                <Image src={session.user.image} alt="" width={48} height={48} className="h-12 w-12 rounded-full" />
               )}
               <div>
                 <p className="text-sm font-medium">{session?.user?.name || "User"}</p>

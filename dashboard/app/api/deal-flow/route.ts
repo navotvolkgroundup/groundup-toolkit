@@ -25,17 +25,17 @@ export async function GET(req: NextRequest) {
       [{ propertyName: "createdate", direction: "ASCENDING" }]
     )
 
-    // Group by week
+    // Group by week — start from this Monday, step back in 7-day intervals
     const weeks: Array<{ week: string; label: string; count: number }> = []
     const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    const todayDay = now.getDay()
+    const thisMonday = new Date(now)
+    thisMonday.setDate(thisMonday.getDate() - ((todayDay + 6) % 7))
 
     for (let i = weeksBack - 1; i >= 0; i--) {
-      const weekStart = new Date(now)
+      const weekStart = new Date(thisMonday)
       weekStart.setDate(weekStart.getDate() - i * 7)
-      weekStart.setHours(0, 0, 0, 0)
-      // Align to Monday
-      const day = weekStart.getDay()
-      weekStart.setDate(weekStart.getDate() - ((day + 6) % 7))
 
       const weekEnd = new Date(weekStart)
       weekEnd.setDate(weekEnd.getDate() + 7)

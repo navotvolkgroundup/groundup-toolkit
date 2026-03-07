@@ -7,15 +7,15 @@ const limiter = rateLimit({ interval: 60_000, limit: 10 })
 
 const ALLOWED_ACTIONS: Record<string, { command: string; description: string }> = {
   "founder-scout-scan": {
-    command: "cd /root/groundup-toolkit && python3 scripts/founder-scout.py scan >> /var/log/founder-scout.log 2>&1 &",
+    command: ". /root/.env && /root/.openclaw/skills/founder-scout/scout.py scan >> /var/log/founder-scout.log 2>&1 &",
     description: "Run Founder Scout scan",
   },
   "email-to-deal": {
-    command: "cd /root/groundup-toolkit && python3 scripts/email-to-deal-automation.py >> /var/log/deal-automation.log 2>&1 &",
+    command: ". /root/.env && /root/email-to-deal-automation.py >> /var/log/deal-automation.log 2>&1 &",
     description: "Process emails now",
   },
   "meeting-check": {
-    command: "cd /root/groundup-toolkit && python3 scripts/meeting-reminders.py check-and-notify >> /var/log/meeting-reminders.log 2>&1 &",
+    command: "/root/.openclaw/skills/meeting-reminders/meeting-reminders reminders >> /var/log/meeting-reminders.log 2>&1 &",
     description: "Check upcoming meetings",
   },
 }

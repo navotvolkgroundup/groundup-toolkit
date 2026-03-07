@@ -5,12 +5,13 @@ import { hubspotSearchAll } from "@/lib/hubspot"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
 
+// HubSpot owner IDs → display names
 const TEAM_MEMBERS: Record<string, string> = {
-  "navot": "Navot",
-  "jordan": "Jordan",
-  "cory": "Cory",
-  "david": "David",
-  "allie": "Allie",
+  "76836577": "Navot",
+  "7042119": "Jordan",
+  "80040886": "Cory",
+  "78681903": "David",
+  "80351816": "Allie",
 }
 
 export async function GET(req: NextRequest) {
@@ -32,32 +33,33 @@ export async function GET(req: NextRequest) {
       [{ propertyName: "createdate", direction: "ASCENDING" }]
     )
 
-    // Build week labels
+    // Build week buckets starting from this Monday, going back
     const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    const todayDay = now.getDay()
+    const thisMonday = new Date(now)
+    thisMonday.setDate(thisMonday.getDate() - ((todayDay + 6) % 7))
+
     const weekLabels: string[] = []
     const weekStarts: Date[] = []
     for (let i = weeksBack - 1; i >= 0; i--) {
-      const weekStart = new Date(now)
+      const weekStart = new Date(thisMonday)
       weekStart.setDate(weekStart.getDate() - i * 7)
-      weekStart.setHours(0, 0, 0, 0)
-      const day = weekStart.getDay()
-      weekStart.setDate(weekStart.getDate() - ((day + 6) % 7))
       weekStarts.push(weekStart)
       weekLabels.push(`${weekStart.getDate()}/${weekStart.getMonth() + 1}`)
     }
 
-    // Group deals by team member and week
-    // Use deal notes/description to try to identify which team member sourced it
+    // Group deals by team member (owner ID) and week
     const heatmap: Array<{ member: string; weeks: number[] }> = []
 
-    for (const [memberId, memberName] of Object.entries(TEAM_MEMBERS)) {
+    for (const [ownerId, memberName] of Object.entries(TEAM_MEMBERS)) {
       const weekCounts = new Array(weeksBack).fill(0)
 
       for (const deal of deals) {
+        const dealOwner = deal.properties.hubspot_owner_id || ""
         const source = (deal.properties.groundup_source || "").toLowerCase()
-        const owner = (deal.properties.hubspot_owner_id || "").toLowerCase()
 
-        if (source.includes(memberId) || owner.includes(memberId) || source.includes(memberName.toLowerCase())) {
+        if (dealOwner === ownerId || source.includes(memberName.toLowerCase())) {
           const created = new Date(deal.properties.createdate || "")
           for (let w = 0; w < weekStarts.length; w++) {
             const weekEnd = new Date(weekStarts[w])

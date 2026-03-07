@@ -35,22 +35,28 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
-    // Deals this week from HubSpot
+    // Deals this week from HubSpot (VC Deal Flow pipeline only)
     const weekAgo = new Date()
     weekAgo.setDate(weekAgo.getDate() - 7)
     const weekResult = await hubspotSearch(
       "deals",
-      [{ propertyName: "createdate", operator: "GTE", value: weekAgo.getTime().toString() }],
+      [
+        { propertyName: "createdate", operator: "GTE", value: weekAgo.getTime().toString() },
+        { propertyName: "pipeline", operator: "EQ", value: "default" },
+      ],
       ["dealname"],
     )
     const dealsThisWeek = weekResult.total
 
-    // Deals this month from HubSpot
+    // Deals this month from HubSpot (VC Deal Flow pipeline only)
     const monthAgo = new Date()
     monthAgo.setDate(monthAgo.getDate() - 30)
     const monthResult = await hubspotSearch(
       "deals",
-      [{ propertyName: "createdate", operator: "GTE", value: monthAgo.getTime().toString() }],
+      [
+        { propertyName: "createdate", operator: "GTE", value: monthAgo.getTime().toString() },
+        { propertyName: "pipeline", operator: "EQ", value: "default" },
+      ],
       ["dealname"],
     )
     const dealsThisMonth = monthResult.total
