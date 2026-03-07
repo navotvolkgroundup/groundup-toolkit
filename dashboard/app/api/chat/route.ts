@@ -11,14 +11,18 @@ const limiter = rateLimit({ interval: 60_000, limit: 20 })
 function runAgent(sessionId: string, message: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
-      "openclaw",
+      "/usr/bin/openclaw",
       [
         "agent",
         "--session-id", sessionId,
         "--message", message,
         "--json",
       ],
-      { timeout: AGENT_TIMEOUT, maxBuffer: 1024 * 1024 },
+      {
+        timeout: AGENT_TIMEOUT,
+        maxBuffer: 1024 * 1024,
+        env: { ...process.env, HOME: "/root", PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
+      },
       (error, stdout, stderr) => {
         if (error) {
           console.error("[chat] openclaw error:", error.message, stderr)
