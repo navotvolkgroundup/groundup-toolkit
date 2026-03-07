@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
-import { hubspotSearch } from "@/lib/hubspot"
+import { hubspotSearchAll } from "@/lib/hubspot"
 
 const limiter = rateLimit({ interval: 60_000, limit: 30 })
 
+// VC Deal Flow pipeline stages (HubSpot stage IDs → labels)
 const PIPELINE_STAGES = [
-  { id: "new", label: "New", order: 0 },
-  { id: "meeting1", label: "Meeting 1", order: 1 },
-  { id: "meeting2", label: "Meeting 2", order: 2 },
-  { id: "dd", label: "Due Diligence", order: 3 },
-  { id: "termsheet", label: "Term Sheet", order: 4 },
-  { id: "closed", label: "Closed", order: 5 },
-  { id: "keeponradar", label: "Keep on Radar", order: 6 },
-  { id: "passed", label: "Passed", order: 7 },
+  { id: "qualifiedtobuy", label: "Sourcing", order: 0 },
+  { id: "appointmentscheduled", label: "Screening", order: 1 },
+  { id: "presentationscheduled", label: "First Meeting", order: 2 },
+  { id: "decisionmakerboughtin", label: "IC Review", order: 3 },
+  { id: "contractsent", label: "Due Diligence", order: 4 },
+  { id: "closedwon", label: "Term Sheet Offered", order: 5 },
+  { id: "1112320899", label: "Term Sheet Signed", order: 6 },
+  { id: "1112320900", label: "Investment Closed", order: 7 },
+  { id: "1008223160", label: "Portfolio Monitoring", order: 8 },
+  { id: "1138024523", label: "Keep on Radar", order: 9 },
+  { id: "closedlost", label: "Passed", order: 10 },
 ]
 
 export async function GET(req: NextRequest) {
@@ -24,9 +28,9 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
-    const result = await hubspotSearch(
+    const allDeals = await hubspotSearchAll(
       "deals",
-      [{ propertyName: "pipeline", operator: "HAS_PROPERTY" }],
+      [{ propertyName: "pipeline", operator: "EQ", value: "default" }],
       ["dealname", "dealstage", "amount", "hubspot_owner_id", "createdate", "closedate"],
       [{ propertyName: "createdate", direction: "DESCENDING" }]
     )
@@ -37,18 +41,8 @@ export async function GET(req: NextRequest) {
       stageCounts[stage.id] = { count: 0, deals: [] }
     }
 
-    for (const deal of result.results) {
-      const stageName = (deal.properties.dealstage || "").toLowerCase().replace(/[\s_-]+/g, "")
-      // Map HubSpot stage names to our stage IDs
-      let stageId = "new"
-      if (stageName.includes("meeting") && stageName.includes("1")) stageId = "meeting1"
-      else if (stageName.includes("meeting") && stageName.includes("2")) stageId = "meeting2"
-      else if (stageName.includes("diligence") || stageName.includes("dd")) stageId = "dd"
-      else if (stageName.includes("term")) stageId = "termsheet"
-      else if (stageName.includes("closed") || stageName.includes("won")) stageId = "closed"
-      else if (stageName.includes("radar") || stageName.includes("keep")) stageId = "keeponradar"
-      else if (stageName.includes("pass") || stageName.includes("lost") || stageName.includes("dead")) stageId = "passed"
-      else if (stageName.includes("new") || stageName.includes("qualify")) stageId = "new"
+    for (const deal of allDeals) {
+      const stageId = deal.properties.dealstage || ""
 
       if (!stageCounts[stageId]) stageCounts[stageId] = { count: 0, deals: [] }
       stageCounts[stageId].count++
@@ -66,7 +60,7 @@ export async function GET(req: NextRequest) {
       deals: (stageCounts[s.id]?.deals || []).slice(0, 10),
     }))
 
-    return NextResponse.json({ stages, totalDeals: result.results.length })
+    return NextResponse.json({ stages, totalDeals: allDeals.length })
   } catch (e) {
     console.error("Pipeline API error:", e)
     return NextResponse.json({ error: "Failed to fetch pipeline" }, { status: 500 })

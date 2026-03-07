@@ -7,14 +7,17 @@ import { useState } from "react"
 import { cn } from "@/lib/utils"
 
 const stageColors: Record<string, string> = {
-  new: "bg-blue-500",
-  meeting1: "bg-indigo-500",
-  meeting2: "bg-violet-500",
-  dd: "bg-purple-500",
-  termsheet: "bg-fuchsia-500",
-  closed: "bg-green-500",
-  keeponradar: "bg-amber-500",
-  passed: "bg-slate-500",
+  qualifiedtobuy: "bg-blue-500",
+  appointmentscheduled: "bg-indigo-500",
+  presentationscheduled: "bg-violet-500",
+  decisionmakerboughtin: "bg-purple-500",
+  contractsent: "bg-fuchsia-500",
+  closedwon: "bg-pink-500",
+  "1112320899": "bg-emerald-500",
+  "1112320900": "bg-green-500",
+  "1008223160": "bg-teal-500",
+  "1138024523": "bg-amber-500",
+  closedlost: "bg-slate-500",
 }
 
 export function PipelineFunnel() {
@@ -34,8 +37,8 @@ export function PipelineFunnel() {
   }
 
   const stages = data?.stages || []
-  // Active stages = not passed
-  const activeStages = stages.filter((s) => s.id !== "passed")
+  // Active stages = not passed/not pursuing
+  const activeStages = stages.filter((s) => s.id !== "closedlost")
   const maxCount = Math.max(...activeStages.map((s) => s.count), 1)
 
   return (
