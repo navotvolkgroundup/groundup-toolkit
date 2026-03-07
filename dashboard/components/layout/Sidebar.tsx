@@ -11,9 +11,9 @@ import { useSession } from "next-auth/react"
 import Image from "next/image"
 
 const navItems = [
-  { label: "Dashboard", icon: LayoutDashboard, href: "#" },
+  { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Chat", icon: MessageSquare, href: "#chat" },
-  { label: "Settings", icon: Settings, href: "#settings" },
+  { label: "Settings", icon: Settings, href: "/settings" },
 ]
 
 export function Sidebar({
@@ -65,6 +65,7 @@ export function Sidebar({
               variant="ghost"
               onClick={() => {
                 if (item.label === "Chat") openChat()
+                else if (item.href && item.href !== "#chat") window.location.href = item.href
               }}
               className={cn(
                 "w-full justify-start gap-3 text-muted-foreground hover:text-foreground hover:bg-accent",

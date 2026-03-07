@@ -6,6 +6,7 @@ import { useServicesStore } from "@/lib/store/servicesStore"
 import { ServiceCard } from "./ServiceCard"
 import { ServiceHelp } from "./ServiceHelp"
 import { ServiceCategory, Service } from "@/lib/types"
+import { useServiceHealth } from "@/lib/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 
 const categories: (ServiceCategory | "all")[] = [
@@ -31,6 +32,8 @@ export function ServiceGrid() {
     queryKey: ["services"],
     queryFn: () => fetch("/api/services").then((r) => r.json()),
   })
+
+  const { data: healthData } = useServiceHealth()
 
   useEffect(() => {
     if (data) setServices(data)
@@ -61,7 +64,7 @@ export function ServiceGrid() {
       {/* Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {services.map((service, i) => (
-          <ServiceCard key={service.id} service={service} index={i} />
+          <ServiceCard key={service.id} service={service} index={i} health={healthData?.services?.[service.id]} />
         ))}
       </div>
 

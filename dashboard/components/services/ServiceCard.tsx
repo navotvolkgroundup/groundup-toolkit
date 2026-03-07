@@ -20,12 +20,41 @@ const categoryColors: Record<string, string> = {
   "Internal Ops": "bg-slate-500/15 text-slate-400 border-slate-500/20",
 }
 
+interface HealthInfo {
+  serviceId: string
+  lastSuccess: string | null
+  lastError: string | null
+  lastRun: string | null
+  status: "healthy" | "warning" | "error" | "unknown"
+  recentErrors: number
+}
+
+const healthColors: Record<string, string> = {
+  healthy: "bg-green-500",
+  warning: "bg-amber-500",
+  error: "bg-red-500",
+  unknown: "bg-slate-500",
+}
+
+function formatHealthTime(ts: string | null): string {
+  if (!ts) return "never"
+  const diff = Date.now() - new Date(ts).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return "just now"
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.floor(hours / 24)}d ago`
+}
+
 export function ServiceCard({
   service,
   index,
+  health,
 }: {
   service: Service
   index: number
+  health?: HealthInfo
 }) {
   const Icon = getIcon(service.icon)
   const openChat = useChatStore((s) => s.openChat)
@@ -80,10 +109,24 @@ export function ServiceCard({
       {/* Footer */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="text-[10px] text-muted-foreground">
-            {service.lastRun}
-          </span>
-          <StatusBadge status={service.status} />
+          {health ? (
+            <>
+              <div className="flex items-center gap-1.5">
+                <div className={cn("h-1.5 w-1.5 rounded-full", healthColors[health.status])} />
+                <span className="text-[10px] text-muted-foreground">
+                  Last OK: {formatHealthTime(health.lastSuccess)}
+                </span>
+              </div>
+              {health.recentErrors > 0 && (
+                <span className="text-[10px] text-red-400">{health.recentErrors} errors (24h)</span>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="text-[10px] text-muted-foreground">{service.lastRun}</span>
+              <StatusBadge status={service.status} />
+            </>
+          )}
         </div>
       </div>
 
