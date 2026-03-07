@@ -41,7 +41,7 @@ export function Sidebar({
     >
       {/* Logo area */}
       <div className="flex h-16 items-center gap-3 border-b border-border px-4">
-        <ChristinaAvatar size="md" className="rounded-xl" />
+        <ChristinaAvatar size="md" />
         {!collapsed && (
           <div className="flex flex-col">
             <span className="text-sm font-semibold tracking-tight">Christina</span>

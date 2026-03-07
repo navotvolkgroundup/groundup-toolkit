@@ -24,6 +24,8 @@ export function ChristinaAvatar({
       alt="Christina"
       width={px[size]}
       height={px[size]}
+      priority
+      unoptimized
       className={cn("shrink-0 rounded-full object-cover", sizes[size], className)}
     />
   )
