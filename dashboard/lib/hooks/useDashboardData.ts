@@ -147,54 +147,6 @@ export function useSignalConversion() {
   })
 }
 
-export function useScout() {
-  return useQuery({
-    queryKey: ["scout"],
-    queryFn: () => fetchJson<{
-      people: Array<{
-        id: number
-        name: string
-        linkedin_url: string | null
-        headline: string | null
-        source: string | null
-        signal_tier: string | null
-        priority_score: number
-        last_signal: string | null
-        last_scanned: string | null
-        added_at: string
-        hubspot_contact_id: string | null
-      }>
-      signals: Array<{
-        id: number
-        person_name: string
-        linkedin_url: string | null
-        signal_type: string
-        signal_tier: string
-        description: string | null
-        detected_at: string
-        priority_score: number
-      }>
-      stats: {
-        active: number
-        high: number
-        medium: number
-        low: number
-        total_signals: number
-        total_scans: number
-        avg_score: number
-      }
-      lastScan: {
-        scan_type: string
-        started_at: string
-        people_found: number
-        signals_detected: number
-      } | null
-    }>("/api/scout"),
-    refetchInterval: 120_000,
-    staleTime: 60_000,
-  })
-}
-
 export function useServiceHealth() {
   return useQuery({
     queryKey: ["service-health"],

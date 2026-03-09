@@ -5,8 +5,6 @@ import { execSync } from "child_process"
 
 const limiter = rateLimit({ interval: 60_000, limit: 30 })
 
-const DB_PATH = "/root/.openclaw/data/founder-scout.db"
-
 interface Signal {
   id: string
   name: string
@@ -17,27 +15,119 @@ interface Signal {
   source: string
 }
 
-function normSql(sql: string): string {
-  return sql.replace(/\s+/g, " ").trim()
-}
+function parseSignals(): Signal[] {
+  const signals: Signal[] = []
 
-function queryDb(sql: string): string {
   try {
-    const script = `import sqlite3,json,sys;c=sqlite3.connect("${DB_PATH}");c.row_factory=sqlite3.Row;rows=[dict(r) for r in c.execute(sys.argv[1]).fetchall()];print(json.dumps(rows))`
-    return execSync(
-      `python3 -c ${JSON.stringify(script)} ${JSON.stringify(normSql(sql))}`,
-      { encoding: "utf-8", timeout: 5000 }
-    ).trim()
+    const lines = execSync('tail -n 500 /var/log/founder-scout.log 2>/dev/null || true', {
+      encoding: "utf-8",
+      timeout: 3000,
+    }).split("\n")
+
+    let currentTimestamp: string | null = null
+    let currentVisitName: string | null = null
+
+    for (const line of lines) {
+      // Track timestamp from header lines: [2026-03-05 07:00:01.756856]
+      const tsMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/)
+      if (tsMatch) {
+        currentTimestamp = new Date(tsMatch[1].replace(" ", "T") + "Z").toISOString()
+        currentVisitName = null
+        continue
+      }
+
+      if (!currentTimestamp) continue
+      const trimmed = line.trim()
+
+      // Track "Visiting Name..." lines for RELEVANT context
+      const visitMatch = trimmed.match(/^\[\d+\/\d+\] Visiting (.+?)\.\.\./)
+      if (visitMatch) {
+        currentVisitName = visitMatch[1]
+        continue
+      }
+
+      // "RELEVANT: description" — confirmed relevant profile
+      const relevantMatch = trimmed.match(/^RELEVANT:\s*(.+)/)
+      if (relevantMatch && currentVisitName) {
+        const description = relevantMatch[1]
+        signals.push({
+          id: Math.abs(hashCode(currentVisitName + currentTimestamp)).toString(36),
+          name: currentVisitName,
+          company: extractCompany(description),
+          signal: description.slice(0, 200),
+          strength: getStrength(description),
+          timestamp: currentTimestamp,
+          source: "LinkedIn",
+        })
+        continue
+      }
+
+      // "Kept (positive signal): Name — description"
+      const keptMatch = trimmed.match(/^Kept \(positive signal\):\s*(.+?)\s*—\s*(.+)/)
+      if (keptMatch) {
+        signals.push({
+          id: Math.abs(hashCode(keptMatch[1] + currentTimestamp)).toString(36),
+          name: keptMatch[1],
+          company: extractCompany(keptMatch[2]),
+          signal: keptMatch[2].slice(0, 200),
+          strength: getStrength(keptMatch[2]),
+          timestamp: currentTimestamp,
+          source: "LinkedIn",
+        })
+        continue
+      }
+
+      // "Email sent to" or "WhatsApp sent" with relevant count
+      const resultMatch = trimmed.match(/^Scan complete: .+?(\d+) relevant/)
+      if (resultMatch) {
+        // Skip — summary line, not a signal
+        continue
+      }
+    }
   } catch {
-    return "[]"
+    // Ignore errors
   }
+
+  // Deduplicate by name — keep the most recent entry for each person
+  const byName = new Map<string, Signal>()
+  for (const s of signals) {
+    const existing = byName.get(s.name)
+    if (!existing || s.timestamp > existing.timestamp) {
+      byName.set(s.name, s)
+    }
+  }
+
+  return Array.from(byName.values())
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, 20)
 }
 
 function extractCompany(text: string): string {
-  const match = text?.match(/(?:at|of|@)\s+(?:a\s+)?([A-Z][A-Za-z0-9.]+(?:\s+[A-Z][A-Za-z0-9.]+)?)/i)
+  // Look for "at Company" or "CEO of Company" patterns
+  const match = text.match(/(?:at|of|@)\s+(?:a\s+)?([A-Z][A-Za-z0-9.]+(?:\s+[A-Z][A-Za-z0-9.]+)?)/i)
   if (match) return match[1].trim()
-  if (/stealth/i.test(text || "")) return "Stealth"
+  // Look for "stealth" mentions
+  if (/stealth/i.test(text)) return "Stealth"
   return ""
+}
+
+function getStrength(text: string): Signal["strength"] {
+  const lower = text.toLowerCase()
+  if (lower.includes("stealth") || lower.includes("founding") || lower.includes("co-founder") || lower.includes("left") || lower.includes("exited")) {
+    return "high"
+  }
+  if (lower.includes("exploring") || lower.includes("open to") || lower.includes("next chapter") || lower.includes("building")) {
+    return "medium"
+  }
+  return "low"
+}
+
+function hashCode(str: string): number {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0
+  }
+  return hash
 }
 
 export async function GET(req: NextRequest) {
@@ -47,50 +137,6 @@ export async function GET(req: NextRequest) {
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  // Read signals from scout v2 SQLite DB
-  const cutoff = new Date()
-  cutoff.setDate(cutoff.getDate() - 30)
-
-  const rows = queryDb(
-    `SELECT sh.id, tp.name, tp.headline, sh.signal_type, sh.signal_tier,
-            sh.description, sh.detected_at, sh.source_url, tp.source
-     FROM signal_history sh
-     JOIN tracked_people tp ON sh.person_id = tp.id
-     WHERE sh.detected_at >= '${cutoff.toISOString()}'
-     ORDER BY sh.detected_at DESC LIMIT 20`
-  )
-
-  let dbSignals: Array<{
-    id: number; name: string; headline: string | null
-    signal_type: string; signal_tier: string; description: string | null
-    detected_at: string; source_url: string | null; source: string | null
-  }> = []
-  try {
-    dbSignals = JSON.parse(rows || "[]")
-  } catch { /* empty */ }
-
-  const signals: Signal[] = dbSignals.map((s) => ({
-    id: String(s.id),
-    name: s.name,
-    company: extractCompany(s.description || s.headline || ""),
-    signal: (s.description || s.headline || "").slice(0, 200),
-    strength: (s.signal_tier === "high" ? "high" : s.signal_tier === "medium" ? "medium" : "low") as Signal["strength"],
-    timestamp: s.detected_at,
-    source: s.source?.includes("brave") ? "News" : "LinkedIn",
-  }))
-
-  // Deduplicate by name
-  const byName = new Map<string, Signal>()
-  for (const s of signals) {
-    const existing = byName.get(s.name)
-    if (!existing || s.timestamp > existing.timestamp) {
-      byName.set(s.name, s)
-    }
-  }
-
-  return NextResponse.json({
-    signals: Array.from(byName.values())
-      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-      .slice(0, 20)
-  })
+  const signals = parseSignals()
+  return NextResponse.json({ signals })
 }
