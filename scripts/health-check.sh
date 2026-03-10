@@ -25,9 +25,9 @@ TIMESTAMP=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 ALERT_EMAIL="${ALERT_EMAIL:-admin@yourcompany.com}"
 ALERT_PHONE="${ALERT_PHONE:-}"
 ASSISTANT_WHATSAPP_PHONE="${ASSISTANT_WHATSAPP_PHONE:-}"
-ALERT_STATE_DIR="$HOME/.groundup-toolkit/state/health-alerts"
+TOOLKIT_ROOT="${TOOLKIT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+ALERT_STATE_DIR="$TOOLKIT_ROOT/data/health-alerts"
 mkdir -p "$ALERT_STATE_DIR"
-chmod 700 "$HOME/.groundup-toolkit/state" 2>/dev/null || true
 FAILURES=0
 WARNINGS=0
 

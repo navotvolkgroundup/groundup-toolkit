@@ -49,9 +49,10 @@ TEAM_PHONES = config.team_phones
 EMAIL_TO_PHONE = {email: phone for phone, email in TEAM_PHONES.items()}
 
 # Deal analyzer state file (shared with skills/deal-analyzer)
-_STATE_DIR = os.path.expanduser("~/.groundup-toolkit/state")
-os.makedirs(_STATE_DIR, mode=0o700, exist_ok=True)
-DEAL_ANALYZER_STATE = os.path.join(_STATE_DIR, "deal-analyzer-state.json")
+_TOOLKIT_ROOT = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..'))
+_DATA_DIR = os.path.join(_TOOLKIT_ROOT, 'data')
+os.makedirs(_DATA_DIR, exist_ok=True)
+DEAL_ANALYZER_STATE = os.path.join(_DATA_DIR, "deal-analyzer-state.json")
 
 
 

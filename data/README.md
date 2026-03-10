@@ -10,8 +10,11 @@ All runtime state files (SQLite databases, JSON state, tracking files).
 
 ## What belongs here
 
-- SQLite databases (founder-scout, keep-on-radar, meeting-reminders)
-- JSON state files (content-writer state, deal-analyzer tracking)
+- SQLite databases: founder-scout.db, keep-on-radar.db, meeting-reminders.db, founder-briefs.db
+- JSON state: content-writer-state.json, deal-analyzer-state.json, meeting-brief-optin.json
+- Meeting metadata: meeting-meta/ subdirectory
+- Health alerts: health-alerts/ subdirectory
+- Bot tracking: bot-joined-meetings.json
 - Any persistent data that survives restarts
 
 ## What does NOT belong here

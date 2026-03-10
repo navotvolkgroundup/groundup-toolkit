@@ -97,7 +97,9 @@ MAX_SAMPLES = 20
 MIN_SAMPLE_LENGTH = 50
 MAX_SAMPLE_LENGTH = 5000
 STATE_TTL_HOURS = 24
-STATE_FILE = os.path.join(SKILL_DIR, 'state.json')
+_TOOLKIT_ROOT = os.path.join(SKILL_DIR, '..', '..')
+_DATA_DIR = os.path.join(_TOOLKIT_ROOT, 'data')
+STATE_FILE = os.path.join(_DATA_DIR, 'content-writer-state.json')
 
 
 # --- Profile Loading ---

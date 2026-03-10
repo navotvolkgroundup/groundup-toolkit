@@ -196,7 +196,7 @@ def fetch_deck_content(source):
 _ALLOWED_LOCAL_DIRS = [
     os.path.expanduser("~/decks"),
     "/tmp",
-    os.path.expanduser("~/.groundup-toolkit/state"),
+    os.path.join(os.path.dirname(__file__), '..', '..', 'data'),
 ]
 
 

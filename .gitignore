@@ -27,6 +27,7 @@ skills/content-writer/profiles/*/
 # Data & state
 data/*
 !data/README.md
+!data/meeting-brief-optin.json
 *.db
 *.sqlite
 *.log

@@ -20,7 +20,9 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from lib.config import config
 from lib.gws import gws_calendar_events
-JOINED_FILE = os.path.expanduser("~/.bot-joined-meetings.json")
+_TOOLKIT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
+_DATA_DIR = os.path.join(_TOOLKIT_ROOT, 'data')
+JOINED_FILE = os.path.join(_DATA_DIR, 'bot-joined-meetings.json')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 JOIN_SCRIPT = os.path.join(SCRIPT_DIR, "camofox-join.js")
 
@@ -154,9 +156,9 @@ def write_meeting_metadata(event, meet_url):
         "attendees": attendees,
     }
 
-    state_dir = os.path.expanduser("~/.groundup-toolkit/state")
-    os.makedirs(state_dir, mode=0o700, exist_ok=True)
-    meta_path = os.path.join(state_dir, f"meeting-meta-{event_id}.json")
+    meta_dir = os.path.join(_DATA_DIR, "meeting-meta")
+    os.makedirs(meta_dir, exist_ok=True)
+    meta_path = os.path.join(meta_dir, f"meeting-meta-{event_id}.json")
     fd = os.open(meta_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(meta, f, indent=2)

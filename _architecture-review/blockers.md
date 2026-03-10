@@ -21,15 +21,10 @@ Items that need human decision or are too risky to execute autonomously.
 
 ## Low — Remaining Items
 
-### 3. State file consolidation
-- **Issue:** content-writer/state.json is in skills/ dir, deal-analyzer state in ~/.groundup-toolkit/state/
-- **Action:** Move all state to `data/` directory
-- **Status:** Deferred — low risk, cosmetic
-
-### 4. Server deployment sync
+### 3. Server deployment sync
 - **Issue:** All local repo changes need to be deployed to server (77.42.93.149)
 - **Action:** Copy updated scripts to `/root/` and `/root/.openclaw/scripts/` on server
-- **Status:** Deferred — do after all changes are committed
+- **Status:** Ready — all changes committed
 
 ---
 
@@ -42,3 +37,4 @@ Items that need human decision or are too risky to execute autonomously.
 - **HubSpot stage IDs** — Added `stages` to config.yaml, reminders.py reads from config with fallback
 - **Opt-in handler** — Replaced source-code regex modification with JSON file (`data/meeting-brief-optin.json`)
 - **SQLite context managers** — All connections in scout.py and radar.py now use `with` blocks
+- **State file consolidation** — All state files now use `data/` directory (content-writer, deal-analyzer, meeting-bot, health-alerts)

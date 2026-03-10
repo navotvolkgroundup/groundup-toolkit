@@ -36,10 +36,11 @@ from lib.hubspot import search_company as _search_company, add_note as _add_note
 from lib.gws import get_google_access_token
 
 # --- Constants ---
-_STATE_DIR = os.path.expanduser("~/.groundup-toolkit/state")
-os.makedirs(_STATE_DIR, mode=0o700, exist_ok=True)
-STATE_FILE = os.path.join(_STATE_DIR, "deal-analyzer-state.json")
-DEMO_STATE_FILE = os.path.join(_STATE_DIR, "deal-analyzer-demo.json")
+_TOOLKIT_ROOT = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..', '..'))
+_DATA_DIR = os.path.join(_TOOLKIT_ROOT, 'data')
+os.makedirs(_DATA_DIR, exist_ok=True)
+STATE_FILE = os.path.join(_DATA_DIR, "deal-analyzer-state.json")
+DEMO_STATE_FILE = os.path.join(_DATA_DIR, "deal-analyzer-demo.json")
 
 # call_claude, brave_search, send_whatsapp, send_email imported from lib/
 
@@ -360,7 +361,7 @@ def extract_deck_links(text):
 ALLOWED_LOCAL_DIRS = [
     os.path.expanduser("~/decks"),
     "/tmp/openclaw",
-    os.path.expanduser("~/.groundup-toolkit/state"),
+    _DATA_DIR,
 ]
 
 
