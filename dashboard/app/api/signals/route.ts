@@ -13,11 +13,50 @@ interface Signal {
   strength: "high" | "medium" | "low"
   timestamp: string
   source: string
+  linkedinUrl: string | null
 }
 
 function parseSignals(): Signal[] {
-  const signals: Signal[] = []
+  // Primary: read from founder-scout database (has LinkedIn URLs)
+  try {
+    const dbResult = execSync(
+      `python3 -c "
+import sqlite3, json
+conn = sqlite3.connect('/root/.openclaw/data/founder-scout.db')
+rows = conn.execute('''
+  SELECT p.id, p.name, p.linkedin_url, p.signal_tier, p.last_signal, p.last_scanned, p.headline, p.github_url
+  FROM tracked_people p
+  WHERE p.status = 'active' AND p.last_signal IS NOT NULL
+  ORDER BY p.last_scanned DESC
+  LIMIT 20
+''').fetchall()
+print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], last_signal=r[4], last_scanned=r[5], headline=r[6], github_url=r[7]) for r in rows]))
+" 2>/dev/null`,
+      { encoding: "utf-8", timeout: 5000 }
+    ).trim()
 
+    if (dbResult) {
+      const rows = JSON.parse(dbResult) as Array<{
+        id: number; name: string; linkedin_url: string | null; signal_tier: string
+        last_signal: string; last_scanned: string; headline: string | null; github_url: string | null
+      }>
+      return rows.map((r) => ({
+        id: r.id.toString(),
+        name: r.name,
+        company: extractCompany(r.last_signal, r.headline),
+        signal: r.last_signal.slice(0, 200),
+        strength: (r.signal_tier === "high" ? "high" : r.signal_tier === "medium" ? "medium" : "low") as Signal["strength"],
+        timestamp: new Date(r.last_scanned).toISOString(),
+        source: r.linkedin_url ? "LinkedIn" : r.github_url ? "GitHub" : "LinkedIn",
+        linkedinUrl: r.linkedin_url || null,
+      }))
+    }
+  } catch {
+    // Fall through to log-based parsing
+  }
+
+  // Fallback: parse log files (no LinkedIn URLs available)
+  const signals: Signal[] = []
   try {
     const lines = execSync('tail -n 500 /var/log/founder-scout.log 2>/dev/null || true', {
       encoding: "utf-8",
@@ -28,7 +67,6 @@ function parseSignals(): Signal[] {
     let currentVisitName: string | null = null
 
     for (const line of lines) {
-      // Track timestamp from header lines: [2026-03-05 07:00:01.756856]
       const tsMatch = line.match(/^\[(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/)
       if (tsMatch) {
         currentTimestamp = new Date(tsMatch[1].replace(" ", "T") + "Z").toISOString()
@@ -39,14 +77,9 @@ function parseSignals(): Signal[] {
       if (!currentTimestamp) continue
       const trimmed = line.trim()
 
-      // Track "Visiting Name..." lines for RELEVANT context
       const visitMatch = trimmed.match(/^\[\d+\/\d+\] Visiting (.+?)\.\.\./)
-      if (visitMatch) {
-        currentVisitName = visitMatch[1]
-        continue
-      }
+      if (visitMatch) { currentVisitName = visitMatch[1]; continue }
 
-      // "RELEVANT: description" — confirmed relevant profile
       const relevantMatch = trimmed.match(/^RELEVANT:\s*(.+)/)
       if (relevantMatch && currentVisitName) {
         const description = relevantMatch[1]
@@ -58,11 +91,11 @@ function parseSignals(): Signal[] {
           strength: getStrength(description),
           timestamp: currentTimestamp,
           source: "LinkedIn",
+          linkedinUrl: null,
         })
         continue
       }
 
-      // "Kept (positive signal): Name — description"
       const keptMatch = trimmed.match(/^Kept \(positive signal\):\s*(.+?)\s*—\s*(.+)/)
       if (keptMatch) {
         signals.push({
@@ -73,14 +106,8 @@ function parseSignals(): Signal[] {
           strength: getStrength(keptMatch[2]),
           timestamp: currentTimestamp,
           source: "LinkedIn",
+          linkedinUrl: null,
         })
-        continue
-      }
-
-      // "Email sent to" or "WhatsApp sent" with relevant count
-      const resultMatch = trimmed.match(/^Scan complete: .+?(\d+) relevant/)
-      if (resultMatch) {
-        // Skip — summary line, not a signal
         continue
       }
     }
@@ -88,13 +115,10 @@ function parseSignals(): Signal[] {
     // Ignore errors
   }
 
-  // Deduplicate by name — keep the most recent entry for each person
   const byName = new Map<string, Signal>()
   for (const s of signals) {
     const existing = byName.get(s.name)
-    if (!existing || s.timestamp > existing.timestamp) {
-      byName.set(s.name, s)
-    }
+    if (!existing || s.timestamp > existing.timestamp) byName.set(s.name, s)
   }
 
   return Array.from(byName.values())
@@ -102,12 +126,18 @@ function parseSignals(): Signal[] {
     .slice(0, 20)
 }
 
-function extractCompany(text: string): string {
-  // Look for "at Company" or "CEO of Company" patterns
-  const match = text.match(/(?:at|of|@)\s+(?:a\s+)?([A-Z][A-Za-z0-9.]+(?:\s+[A-Z][A-Za-z0-9.]+)?)/i)
+function extractCompany(text: string, headline?: string | null): string {
+  // Try headline first (e.g. "CEO at Everywhen")
+  const src = headline || text
+  const match = src.match(/(?:at|of|@)\s+(?:a\s+)?([A-Z][A-Za-z0-9.]+(?:\s+[A-Z][A-Za-z0-9.]+)?)/i)
   if (match) return match[1].trim()
-  // Look for "stealth" mentions
-  if (/stealth/i.test(text)) return "Stealth"
+  if (/stealth/i.test(src)) return "Stealth"
+  // Try text if headline didn't match
+  if (headline && text !== headline) {
+    const textMatch = text.match(/(?:at|of|@)\s+(?:a\s+)?([A-Z][A-Za-z0-9.]+(?:\s+[A-Z][A-Za-z0-9.]+)?)/i)
+    if (textMatch) return textMatch[1].trim()
+    if (/stealth/i.test(text)) return "Stealth"
+  }
   return ""
 }
 

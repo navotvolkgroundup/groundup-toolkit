@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Radar, ArrowUpRight, ArrowRight, ArrowDownRight } from "lucide-react"
+import { Radar, ArrowUpRight, ArrowRight, ArrowDownRight, ExternalLink } from "lucide-react"
 import { useSignals } from "@/lib/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 
@@ -72,7 +72,19 @@ export function SignalFeed() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium truncate">{signal.name}</span>
+                    {signal.linkedinUrl ? (
+                      <a
+                        href={signal.linkedinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-medium truncate hover:text-primary transition-colors inline-flex items-center gap-1"
+                      >
+                        {signal.name}
+                        <ExternalLink className="h-2.5 w-2.5 opacity-50" />
+                      </a>
+                    ) : (
+                      <span className="text-xs font-medium truncate">{signal.name}</span>
+                    )}
                     {signal.company && (
                       <span className="text-[10px] text-muted-foreground truncate">@ {signal.company}</span>
                     )}

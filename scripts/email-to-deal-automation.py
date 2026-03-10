@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.expanduser('~/.openclaw'))
 from lib.config import config
 from lib.gws import (gws_gmail_search, gws_gmail_thread_get, gws_gmail_modify, gws_gmail_send, gws_gmail_attachment_download)
 from lib.safe_url import is_safe_url, safe_request
+from scripts.portfolio_monitor import handle_portfolio_email
 
 ANTHROPIC_API_KEY = config.anthropic_api_key
 
@@ -132,6 +133,76 @@ def extract_company_info(thread):
         company_name = ''
 
     return {'name': company_name, 'description': f'Created from email: {subject}'}
+
+
+def _extract_company_from_email_domains(thread_data):
+    """Extract company name from non-team email domains in thread messages."""
+    team_domain = config.team_domain.lower()
+    common_domains = {'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+                      'aol.com', 'protonmail.com', 'live.com', 'me.com', 'mac.com'}
+    for msg in thread_data.get('messages', []):
+        headers = msg.get('payload', {}).get('headers', [])
+        for h in headers:
+            if h['name'].lower() in ('from', 'to', 'cc'):
+                emails = re.findall(r'[\w.+-]+@([\w.-]+)', h['value'])
+                for domain in emails:
+                    domain_lower = domain.lower()
+                    if domain_lower != team_domain and domain_lower not in common_domains:
+                        # Use the domain name part (before TLD) as company name
+                        name_part = domain_lower.split('.')[0]
+                        if len(name_part) >= 2:
+                            return name_part.capitalize()
+    return None
+
+
+def _extract_company_with_claude(subject, body_snippet):
+    """Use Claude Haiku to extract company name from email content."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    try:
+        resp = requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={
+                'x-api-key': ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json'
+            },
+            json={
+                'model': 'claude-haiku-4-5-20251001',
+                'max_tokens': 50,
+                'messages': [{'role': 'user', 'content':
+                    f'Extract ONLY the startup/company name from this email. '
+                    f'Reply with just the company name, nothing else. '
+                    f'If you cannot determine it, reply "UNKNOWN".\n\n'
+                    f'Subject: {subject}\nBody: {body_snippet[:500]}'}]
+            },
+            timeout=10
+        )
+        resp.raise_for_status()
+        name = resp.json()['content'][0]['text'].strip().strip('"\'')
+        if name and name != 'UNKNOWN' and len(name) >= 2:
+            print(f'  Claude extracted company name: {name}')
+            return name
+    except Exception as e:
+        print(f'  Claude company extraction failed: {e}', file=sys.stderr)
+    return None
+
+
+def _is_bad_company_name(name):
+    """Check if extracted company name looks like garbage (subject fragment, too short, etc.)."""
+    if not name or len(name) < 3:
+        return True
+    # Contains question mark — likely a subject fragment like "Intro call?"
+    if '?' in name:
+        return True
+    # Starts with common email subject words that aren't company names
+    bad_starts = ['intro ', 'meeting ', 'call ', 'chat ', 'follow', 'catch', 'quick ', 'schedule']
+    name_lower = name.lower()
+    for prefix in bad_starts:
+        if name_lower.startswith(prefix):
+            return True
+    return False
+
 
 def create_hubspot_company(company_data):
     if not MATON_API_KEY:
@@ -1253,16 +1324,20 @@ def process_email(thread):
     sender_match = re.search(r'<(.+?)>', from_email)
     sender_email = sender_match.group(1) if sender_match else from_email.strip()
     if sender_email not in TEAM_MEMBERS:
-        # Try first message too (some threads have team member as first sender)
-        first_msg = thread_data['messages'][0]
-        first_headers = first_msg.get('payload', {}).get('headers', [])
-        first_from = next((h['value'] for h in first_headers if h['name'].lower() == 'from'), '')
-        first_match = re.search(r'<(.+?)>', first_from)
-        first_sender = first_match.group(1) if first_match else first_from.strip()
-        if first_sender in TEAM_MEMBERS:
-            sender_email = first_sender
+        # Scan ALL messages in thread for a team member sender
+        found_team_sender = None
+        for msg in thread_data['messages']:
+            msg_headers = msg.get('payload', {}).get('headers', [])
+            msg_from = next((h['value'] for h in msg_headers if h['name'].lower() == 'from'), '')
+            msg_match = re.search(r'<(.+?)>', msg_from)
+            msg_sender = msg_match.group(1) if msg_match else msg_from.strip()
+            if msg_sender in TEAM_MEMBERS:
+                found_team_sender = msg_sender
+                break
+        if found_team_sender:
+            sender_email = found_team_sender
         else:
-            print(f'  Skipping: sender {sender_email} not a team member (subject: {subject})')
+            print(f'  Skipping: no team member sender found in thread (last sender: {sender_email}, subject: {subject})')
             return False
 
     print(f'\nProcessing: {subject}')
@@ -1275,6 +1350,13 @@ def process_email(thread):
         print('  Skipped: System/automated email (not a deal)')
         mark_email_processed(thread_id)
         return False
+
+    # Check if this is a portfolio company update (not a deal)
+    portfolio_result = handle_portfolio_email(sender_email, subject, body)
+    if portfolio_result:
+        print(f'  Handled as portfolio update for {portfolio_result["company_name"]}')
+        mark_email_processed(thread_id)
+        return True
 
     is_lp = is_lp_email(subject, body)
 
@@ -1382,8 +1464,24 @@ def process_email(thread):
             else:
                 print(f'  ✗ Could not download attachment')
 
+    # Fallback: if company name looks bad, try domain extraction then Claude
+    if _is_bad_company_name(company_data['name']):
+        print(f'  Bad company name "{company_data["name"]}" — trying fallbacks')
+        # Try extracting from email domains in thread
+        domain_name = _extract_company_from_email_domains(thread_data)
+        if domain_name and not _is_bad_company_name(domain_name):
+            print(f'  Domain fallback: {domain_name}')
+            company_data['name'] = domain_name
+        else:
+            # Try Claude extraction
+            claude_name = _extract_company_with_claude(subject, body)
+            if claude_name and not _is_bad_company_name(claude_name):
+                company_data['name'] = claude_name
+            else:
+                print(f'  All fallbacks failed for company name')
+
     # If company name couldn't be resolved, ask the user via WhatsApp
-    if not company_data['name']:
+    if not company_data['name'] or _is_bad_company_name(company_data['name']):
         sender_phone = EMAIL_TO_PHONE.get(sender_email)
         if sender_phone:
             send_whatsapp(sender_phone, f"New email: \"{subject}\"\n\nI couldn't figure out the company name. What's the company?")

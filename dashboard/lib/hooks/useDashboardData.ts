@@ -77,6 +77,7 @@ export function useSignals() {
         strength: "high" | "medium" | "low"
         timestamp: string
         source: string
+        linkedinUrl: string | null
       }>
     }>("/api/signals"),
     refetchInterval: 120_000,
