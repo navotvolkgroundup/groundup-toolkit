@@ -8,7 +8,7 @@ import { QuickActions } from "@/components/dashboard/QuickActions"
 import { DealFlowChart } from "@/components/dashboard/DealFlowChart"
 import { TeamHeatmap } from "@/components/dashboard/TeamHeatmap"
 import { DealMovements } from "@/components/dashboard/DealMovements"
-import { MeetingPrep } from "@/components/dashboard/MeetingPrep"
+import { StaleDeals } from "@/components/dashboard/StaleDeals"
 import { SignalFeed } from "@/components/dashboard/SignalFeed"
 import { LeadsPanel } from "@/components/dashboard/LeadsPanel"
 import { DealSources } from "@/components/dashboard/DealSources"
@@ -44,10 +44,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Activity & Schedule */}
-      <SectionHeader>Activity & Schedule</SectionHeader>
+      <SectionHeader>Activity & Pipeline Health</SectionHeader>
       <div className="grid gap-6 lg:grid-cols-2 mb-8">
         <DealMovements />
-        <MeetingPrep />
+        <StaleDeals />
       </div>
 
       {/* Metrics */}
