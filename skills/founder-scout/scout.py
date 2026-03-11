@@ -49,6 +49,7 @@ from lib.email import send_email
 from lib.hubspot import (
     search_contact, create_contact, update_contact,
     search_company, create_company, associate_contact_company,
+    fetch_deals_by_stage,
 )
 
 # --- Configuration ---
@@ -1196,7 +1197,67 @@ def run_sync_hubspot():
         else:
             print(f"  Failed to create contact for {name}", file=sys.stderr)
 
-    print(f"  Sync complete: {created} created, {updated} updated, {skipped} skipped")
+    # Auto-detect approached: check if any tracked person matches a HubSpot deal
+    auto_approached = _auto_detect_approached(db, people)
+
+    print(f"  Sync complete: {created} created, {updated} updated, {skipped} skipped, {auto_approached} auto-approached")
+
+
+def _auto_detect_approached(db, people):
+    """Cross-reference tracked people against HubSpot deals to auto-mark approached.
+
+    Searches all active pipeline deals and checks if any founder name appears
+    in a deal name (e.g. deal "Fluent.ai" matches founder at Fluent.ai).
+    Also matches by first+last name in deal names/notes.
+    """
+    unapproached = [p for p in people if not p.get('approached')]
+    if not unapproached:
+        return 0
+
+    # Fetch all deals from active pipeline stages
+    all_deal_names = set()
+    try:
+        from lib.config import config
+        pipeline_config = config._data.get('hubspot', {}).get('pipelines', [{}])[0]
+        stages = pipeline_config.get('stages', {})
+        for stage_id in stages:
+            deals = fetch_deals_by_stage(stage_id, properties=['dealname'])
+            for d in deals:
+                name = d.get('properties', {}).get('dealname', '')
+                if name:
+                    all_deal_names.add(name.lower().strip())
+    except Exception as e:
+        print(f"  Auto-detect: failed to fetch deals: {e}", file=sys.stderr)
+        return 0
+
+    if not all_deal_names:
+        return 0
+
+    count = 0
+    for person in unapproached:
+        name = person['name'].lower()
+        parts = name.split()
+        # Check: person's last name in any deal name, or person's full name
+        matched = False
+        for deal_name in all_deal_names:
+            # Match by last name (most common — deal is named after company, founder's last name often matches)
+            if len(parts) > 1 and parts[-1] in deal_name:
+                matched = True
+                break
+            # Match by full name
+            if name in deal_name:
+                matched = True
+                break
+
+        if matched:
+            db.mark_approached(person['id'])
+            hubspot_id = person.get('hubspot_contact_id')
+            if hubspot_id:
+                update_contact(hubspot_id, {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'})
+            print(f"  Auto-approached: {person['name']} (matched deal)")
+            count += 1
+
+    return count
 
 
 def run_approach(name_query):

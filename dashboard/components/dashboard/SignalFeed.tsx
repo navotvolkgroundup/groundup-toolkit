@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Radar, ArrowUpRight, ArrowRight, ArrowDownRight, ExternalLink } from "lucide-react"
+import { Radar, ArrowUpRight, ArrowRight, ArrowDownRight, ExternalLink, Check } from "lucide-react"
 import { useSignals } from "@/lib/hooks/useDashboardData"
 import { cn } from "@/lib/utils"
 
@@ -84,6 +84,12 @@ export function SignalFeed() {
                       </a>
                     ) : (
                       <span className="text-xs font-medium truncate">{signal.name}</span>
+                    )}
+                    {signal.approached && (
+                      <span className="inline-flex items-center gap-0.5 text-[9px] text-green-400 bg-green-500/10 border border-green-500/20 rounded px-1.5 py-0.5">
+                        <Check className="h-2.5 w-2.5" />
+                        pinged
+                      </span>
                     )}
                     {signal.company && (
                       <span className="text-[10px] text-muted-foreground truncate">@ {signal.company}</span>

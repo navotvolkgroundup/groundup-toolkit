@@ -14,6 +14,7 @@ interface Signal {
   timestamp: string
   source: string
   linkedinUrl: string | null
+  approached: boolean
 }
 
 function parseSignals(): Signal[] {
@@ -23,14 +24,11 @@ function parseSignals(): Signal[] {
       `python3 -c "
 import sqlite3, json
 conn = sqlite3.connect('/root/.openclaw/data/founder-scout.db')
-rows = conn.execute('''
-  SELECT p.id, p.name, p.linkedin_url, p.signal_tier, p.last_signal, p.last_scanned, p.headline, p.github_url
-  FROM tracked_people p
-  WHERE p.status = 'active' AND p.last_signal IS NOT NULL
-  ORDER BY p.last_scanned DESC
-  LIMIT 20
-''').fetchall()
-print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], last_signal=r[4], last_scanned=r[5], headline=r[6], github_url=r[7]) for r in rows]))
+cols = [row[1] for row in conn.execute('PRAGMA table_info(tracked_people)').fetchall()]
+approached_col = ', p.approached' if 'approached' in cols else ', 0'
+q = 'SELECT p.id, p.name, p.linkedin_url, p.signal_tier, p.last_signal, p.last_scanned, p.headline, p.github_url' + approached_col + ''' FROM tracked_people p WHERE p.status = \\\"active\\\" AND p.last_signal IS NOT NULL ORDER BY p.last_scanned DESC LIMIT 20'''
+rows = conn.execute(q).fetchall()
+print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], last_signal=r[4], last_scanned=r[5], headline=r[6], github_url=r[7], approached=r[8]) for r in rows]))
 " 2>/dev/null`,
       { encoding: "utf-8", timeout: 5000 }
     ).trim()
@@ -39,6 +37,7 @@ print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], 
       const rows = JSON.parse(dbResult) as Array<{
         id: number; name: string; linkedin_url: string | null; signal_tier: string
         last_signal: string; last_scanned: string; headline: string | null; github_url: string | null
+        approached: number
       }>
       return rows.map((r) => ({
         id: r.id.toString(),
@@ -49,6 +48,7 @@ print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], 
         timestamp: new Date(r.last_scanned).toISOString(),
         source: r.linkedin_url ? "LinkedIn" : r.github_url ? "GitHub" : "LinkedIn",
         linkedinUrl: r.linkedin_url || null,
+        approached: !!r.approached,
       }))
     }
   } catch {
@@ -92,6 +92,7 @@ print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], 
           timestamp: currentTimestamp,
           source: "LinkedIn",
           linkedinUrl: null,
+          approached: false,
         })
         continue
       }
@@ -107,6 +108,7 @@ print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], 
           timestamp: currentTimestamp,
           source: "LinkedIn",
           linkedinUrl: null,
+          approached: false,
         })
         continue
       }

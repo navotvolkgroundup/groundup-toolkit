@@ -78,6 +78,7 @@ export function useSignals() {
         timestamp: string
         source: string
         linkedinUrl: string | null
+        approached: boolean
       }>
     }>("/api/signals"),
     refetchInterval: 120_000,
