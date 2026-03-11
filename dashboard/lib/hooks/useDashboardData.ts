@@ -148,6 +148,34 @@ export function useSignalConversion() {
   })
 }
 
+export function useLeads() {
+  return useQuery({
+    queryKey: ["leads"],
+    queryFn: () => fetchJson<{
+      leads: Array<{
+        id: number
+        name: string
+        linkedinUrl: string | null
+        signalTier: "high" | "medium" | "low" | null
+        lastSignal: string | null
+        approached: boolean
+        approachedAt: string | null
+        hubspotContactId: string | null
+        addedAt: string
+      }>
+      stats: {
+        total: number
+        approached: number
+        high: number
+        medium: number
+        inHubspot: number
+      }
+    }>("/api/leads"),
+    refetchInterval: 120_000,
+    staleTime: 60_000,
+  })
+}
+
 export function useServiceHealth() {
   return useQuery({
     queryKey: ["service-health"],

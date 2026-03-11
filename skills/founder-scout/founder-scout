@@ -50,8 +50,31 @@ case "$ACTION" in
         /usr/bin/python3 "$SCRIPT" dismiss "$PERSON_ID"
         ;;
 
+    sync-hubspot)
+        /usr/bin/python3 "$SCRIPT" sync-hubspot
+        ;;
+
+    approach)
+        NAME="${2:-}"
+        if [ -z "$NAME" ]; then
+            echo "Usage: founder-scout approach <name>"
+            exit 1
+        fi
+        shift
+        /usr/bin/python3 "$SCRIPT" approach "$@"
+        ;;
+
+    approach-id)
+        PERSON_ID="${2:-}"
+        if [ -z "$PERSON_ID" ]; then
+            echo "Usage: founder-scout approach-id <id>"
+            exit 1
+        fi
+        /usr/bin/python3 "$SCRIPT" approach-id "$PERSON_ID"
+        ;;
+
     *)
-        echo "Usage: founder-scout [scan|briefing|watchlist-update|status|add <name> [url]|dismiss <id>]"
+        echo "Usage: founder-scout [scan|briefing|watchlist-update|status|add|dismiss|sync-hubspot|approach|approach-id]"
         exit 1
         ;;
 esac

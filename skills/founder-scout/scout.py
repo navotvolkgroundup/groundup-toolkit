@@ -12,6 +12,9 @@ Actions:
   status            Print tracked people and signal counts
   add <name> [url]  Manually add a person to track
   dismiss <id>      Mark a person as dismissed
+  sync-hubspot      Sync all tracked people to HubSpot as lead contacts
+  approach <name>   Mark a person as approached (updates DB + HubSpot)
+  approach-id <id>  Mark a person as approached by DB id
 
 Usage:
   python3 scout.py scan
@@ -20,6 +23,8 @@ Usage:
   python3 scout.py status
   python3 scout.py add "Yossi Cohen" "https://linkedin.com/in/yossicohen"
   python3 scout.py dismiss 42
+  python3 scout.py sync-hubspot
+  python3 scout.py approach "Yuval Lev"
 """
 
 import sys
@@ -41,6 +46,10 @@ from lib.config import config
 from lib.claude import call_claude
 from lib.whatsapp import send_whatsapp
 from lib.email import send_email
+from lib.hubspot import (
+    search_contact, create_contact, update_contact,
+    search_company, create_company, associate_contact_company,
+)
 
 # --- Configuration ---
 LINKEDIN_BROWSER_PROFILE = "linkedin"
@@ -173,6 +182,14 @@ class ScoutDatabase:
                 name TEXT,
                 sent_at TEXT NOT NULL
             )''')
+            # Migration: add hubspot_contact_id if missing
+            cols = [row[1] for row in c.execute('PRAGMA table_info(tracked_people)').fetchall()]
+            if 'hubspot_contact_id' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN hubspot_contact_id TEXT')
+            if 'approached' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN approached INTEGER DEFAULT 0')
+            if 'approached_at' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN approached_at TEXT')
             conn.commit()
 
     def is_profile_sent(self, linkedin_url):
@@ -312,6 +329,46 @@ class ScoutDatabase:
             'total_signals': total_signals, 'total_scans': total_scans,
         }
 
+    def set_hubspot_contact_id(self, person_id, contact_id):
+        with self._conn() as conn:
+            conn.execute(
+                'UPDATE tracked_people SET hubspot_contact_id = ? WHERE id = ?',
+                (str(contact_id), person_id)
+            )
+            conn.commit()
+
+    def mark_approached(self, person_id):
+        with self._conn() as conn:
+            conn.execute(
+                'UPDATE tracked_people SET approached = 1, approached_at = ? WHERE id = ?',
+                (datetime.now().isoformat(), person_id)
+            )
+            conn.commit()
+
+    def search_person_by_name(self, name):
+        """Fuzzy search for a person by name (case-insensitive, partial match)."""
+        with self._conn() as conn:
+            conn.row_factory = sqlite3.Row
+            results = conn.execute(
+                "SELECT * FROM tracked_people WHERE status = 'active' AND LOWER(name) LIKE ?",
+                (f'%{name.lower()}%',)
+            ).fetchall()
+        return [dict(r) for r in results]
+
+    def get_unapproached_leads(self, limit=50):
+        """Get active people not yet approached, for dashboard display."""
+        with self._conn() as conn:
+            conn.row_factory = sqlite3.Row
+            results = conn.execute(
+                '''SELECT * FROM tracked_people
+                   WHERE status = 'active'
+                   ORDER BY
+                     CASE signal_tier WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                     added_at DESC
+                   LIMIT ?''',
+                (limit,)
+            ).fetchall()
+        return [dict(r) for r in results]
 
 
 # --- LinkedIn Browser ---
@@ -1045,7 +1102,9 @@ def run_status():
             tier_label = f"[{p['signal_tier'].upper()}]" if p.get('signal_tier') else "[---]"
             li = f" ({p['linkedin_url']})" if p.get('linkedin_url') else ""
             signal = f" — {p['last_signal'][:60]}" if p.get('last_signal') else ""
-            print(f"    {tier_label} {p['name']}{li}{signal}")
+            approached = " ✓approached" if p.get('approached') else ""
+            hs = f" [HS:{p['hubspot_contact_id']}]" if p.get('hubspot_contact_id') else ""
+            print(f"    {tier_label} {p['name']}{approached}{hs}{li}{signal}")
     else:
         print("\n  No people tracked yet. Run 'founder-scout scan' to start.")
 
@@ -1067,6 +1126,147 @@ def run_dismiss(person_id):
     db = ScoutDatabase(DB_PATH)
     db.dismiss_person(int(person_id))
     print(f"Dismissed person id={person_id}")
+
+
+# --- HubSpot Sync ---
+
+def run_sync_hubspot():
+    """Sync tracked people to HubSpot as contacts (leads)."""
+    print(f"[{datetime.now()}] Syncing Founder Scout leads to HubSpot...")
+
+    db = ScoutDatabase(DB_PATH)
+    people = db.get_active_people()
+
+    if not people:
+        print("  No active people to sync.")
+        return
+
+    created = 0
+    updated = 0
+    skipped = 0
+
+    for person in people:
+        name = person['name']
+        linkedin_url = person.get('linkedin_url')
+        hubspot_id = person.get('hubspot_contact_id')
+
+        # Already synced — update signal tier
+        if hubspot_id:
+            props = {}
+            tier = person.get('signal_tier')
+            if tier:
+                props['scout_signal_tier'] = tier
+            if person.get('last_signal'):
+                props['scout_last_signal'] = person['last_signal'][:200]
+            if person.get('approached'):
+                props['hs_lead_status'] = 'CONTACTED'
+            if props:
+                update_contact(hubspot_id, props)
+                updated += 1
+            else:
+                skipped += 1
+            continue
+
+        # Search by LinkedIn URL first, then by name
+        existing = None
+        if linkedin_url:
+            existing = search_contact(linkedin_url=linkedin_url)
+        if not existing:
+            existing = search_contact(name=name)
+
+        if existing:
+            hubspot_id = existing['id']
+            db.set_hubspot_contact_id(person['id'], hubspot_id)
+            props = {'lifecyclestage': 'lead'}
+            if person.get('signal_tier'):
+                props['scout_signal_tier'] = person['signal_tier']
+            if person.get('approached'):
+                props['hs_lead_status'] = 'CONTACTED'
+            update_contact(hubspot_id, props)
+            updated += 1
+            print(f"  Linked existing: {name} → {hubspot_id}")
+            continue
+
+        # Create new contact
+        parts = name.split(None, 1)
+        firstname = parts[0]
+        lastname = parts[1] if len(parts) > 1 else ''
+
+        extra_props = {}
+        if person.get('signal_tier'):
+            extra_props['scout_signal_tier'] = person['signal_tier']
+        if person.get('last_signal'):
+            extra_props['scout_last_signal'] = person['last_signal'][:200]
+        if person.get('approached'):
+            extra_props['hs_lead_status'] = 'CONTACTED'
+
+        contact_id = create_contact(firstname, lastname, linkedin_url, extra_props)
+        if contact_id:
+            db.set_hubspot_contact_id(person['id'], contact_id)
+            created += 1
+        else:
+            print(f"  Failed to create contact for {name}", file=sys.stderr)
+
+    print(f"  Sync complete: {created} created, {updated} updated, {skipped} skipped")
+
+
+def run_approach(name_query):
+    """Mark a person as approached (by name search). Updates local DB + HubSpot."""
+    db = ScoutDatabase(DB_PATH)
+    matches = db.search_person_by_name(name_query)
+
+    if not matches:
+        print(f"No active person found matching '{name_query}'.")
+        print("Tip: use 'founder-scout status' to see the full watchlist.")
+        sys.exit(1)
+
+    if len(matches) > 1:
+        print(f"Multiple matches for '{name_query}':")
+        for m in matches:
+            tier = f"[{m['signal_tier'].upper()}]" if m.get('signal_tier') else "[---]"
+            approached = " (approached)" if m.get('approached') else ""
+            print(f"  id={m['id']} {tier} {m['name']}{approached}")
+        print("\nUse a more specific name or 'founder-scout approach-id <id>'.")
+        return
+
+    person = matches[0]
+    person_id = person['id']
+    name = person['name']
+
+    # Mark in local DB
+    db.mark_approached(person_id)
+    print(f"Marked {name} as approached.")
+
+    # Update HubSpot if contact exists
+    hubspot_id = person.get('hubspot_contact_id')
+    if hubspot_id:
+        update_contact(hubspot_id, {'hs_lead_status': 'CONTACTED'})
+        print(f"  HubSpot contact {hubspot_id} updated: hs_lead_status → CONTACTED")
+    else:
+        print(f"  No HubSpot contact yet. Run 'founder-scout sync-hubspot' to create it.")
+
+
+def run_approach_by_id(person_id):
+    """Mark a person as approached by DB id."""
+    db = ScoutDatabase(DB_PATH)
+    with db._conn() as conn:
+        conn.row_factory = sqlite3.Row
+        person = conn.execute(
+            'SELECT * FROM tracked_people WHERE id = ?', (int(person_id),)
+        ).fetchone()
+
+    if not person:
+        print(f"No person found with id={person_id}")
+        sys.exit(1)
+
+    person = dict(person)
+    db.mark_approached(person['id'])
+    print(f"Marked {person['name']} (id={person_id}) as approached.")
+
+    hubspot_id = person.get('hubspot_contact_id')
+    if hubspot_id:
+        update_contact(hubspot_id, {'hs_lead_status': 'CONTACTED'})
+        print(f"  HubSpot contact {hubspot_id} updated: hs_lead_status → CONTACTED")
 
 
 # --- Entry Point ---
@@ -1113,6 +1313,21 @@ def main():
             print("Usage: scout.py dismiss <id>")
             sys.exit(1)
         run_dismiss(sys.argv[2])
+
+    elif action == 'sync-hubspot':
+        run_sync_hubspot()
+
+    elif action == 'approach':
+        if len(sys.argv) < 3:
+            print("Usage: scout.py approach <name>")
+            sys.exit(1)
+        run_approach(' '.join(sys.argv[2:]))
+
+    elif action == 'approach-id':
+        if len(sys.argv) < 3:
+            print("Usage: scout.py approach-id <id>")
+            sys.exit(1)
+        run_approach_by_id(sys.argv[2])
 
     else:
         print(f"Unknown action: {action}")

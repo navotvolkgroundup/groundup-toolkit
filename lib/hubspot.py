@@ -422,3 +422,138 @@ def get_latest_note(company_id):
     except Exception as e:
         print(f"  Error fetching notes: {e}", file=sys.stderr)
         return None
+
+
+# --- Contact Operations ---
+
+ASSOC_CONTACT_TO_COMPANY = 279
+ASSOC_CONTACT_TO_DEAL = 4
+
+
+def search_contact(email=None, linkedin_url=None, name=None):
+    """Search HubSpot for a contact by email, LinkedIn URL, or name.
+
+    Returns:
+        Contact dict with id and properties, or None.
+    """
+    if not MATON_API_KEY:
+        return None
+
+    if email:
+        filters = [{"propertyName": "email", "operator": "EQ", "value": email}]
+    elif linkedin_url:
+        filters = [{"propertyName": "hs_linkedinid", "operator": "EQ", "value": linkedin_url}]
+    elif name:
+        filters = [{"propertyName": "firstname", "operator": "CONTAINS_TOKEN", "value": name.split()[0]}]
+    else:
+        return None
+
+    try:
+        response = requests.post(
+            _url("crm/v3/objects/contacts/search"),
+            headers=_HEADERS,
+            json={
+                "filterGroups": [{"filters": filters}],
+                "properties": ["firstname", "lastname", "email", "hs_linkedinid",
+                               "lifecyclestage", "hs_lead_status", "company"],
+                "limit": 5,
+            },
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return None
+
+        results = response.json().get("results", [])
+        if not results:
+            return None
+
+        # If searching by name, try to match full name
+        if name and len(results) > 1:
+            name_lower = name.lower()
+            for r in results:
+                props = r.get("properties", {})
+                full = f"{props.get('firstname', '')} {props.get('lastname', '')}".strip().lower()
+                if full == name_lower:
+                    return r
+        return results[0]
+    except Exception as e:
+        print(f"  HubSpot contact search error: {e}", file=sys.stderr)
+        return None
+
+
+def create_contact(firstname, lastname="", linkedin_url=None, properties=None):
+    """Create a new HubSpot contact.
+
+    Args:
+        firstname: First name.
+        lastname: Last name.
+        linkedin_url: LinkedIn profile URL (stored in hs_linkedinid).
+        properties: Additional properties dict.
+
+    Returns:
+        Contact ID string, or None on failure.
+    """
+    if not MATON_API_KEY:
+        return None
+
+    props = {"firstname": firstname, "lastname": lastname,
+             "lifecyclestage": "lead"}
+    if linkedin_url:
+        props["hs_linkedinid"] = linkedin_url
+    if properties:
+        props.update(properties)
+
+    try:
+        response = requests.post(
+            _url("crm/v3/objects/contacts"),
+            headers=_HEADERS,
+            json={"properties": props},
+            timeout=10,
+        )
+        response.raise_for_status()
+        result = response.json()
+        print(f"  Created contact: {firstname} {lastname} (ID: {result['id']})")
+        return result["id"]
+    except Exception as e:
+        print(f"  Error creating contact: {e}", file=sys.stderr)
+        return None
+
+
+def update_contact(contact_id, properties):
+    """Update a HubSpot contact's properties.
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        response = requests.patch(
+            _url(f"crm/v3/objects/contacts/{contact_id}"),
+            headers=_HEADERS,
+            json={"properties": properties},
+            timeout=10,
+        )
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"  Error updating contact: {e}", file=sys.stderr)
+        return False
+
+
+def associate_contact_company(contact_id, company_id):
+    """Associate a contact with a company.
+
+    Returns:
+        True on success, False on failure.
+    """
+    try:
+        response = requests.put(
+            _url(f"crm/v4/objects/contacts/{contact_id}/associations/companies/{company_id}"),
+            headers=_HEADERS,
+            json=[{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": ASSOC_CONTACT_TO_COMPANY}],
+            timeout=10,
+        )
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"  Error associating contact/company: {e}", file=sys.stderr)
+        return False

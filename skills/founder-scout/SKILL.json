@@ -1,0 +1,27 @@
+{
+  "name": "founder-scout",
+  "version": "1.0.0",
+  "description": "Proactive discovery of Israeli tech founders. Includes LinkedIn scouting, HubSpot lead sync, and approach tracking.",
+  "author": "GroundUp Toolkit",
+  "executables": [
+    {
+      "name": "founder-scout",
+      "description": "Run founder scout actions: scan, briefing, watchlist-update, status, sync-hubspot, approach",
+      "triggers": [
+        "founder.*scout",
+        "scout.*founder",
+        "linkedin.*scout"
+      ]
+    },
+    {
+      "name": "founder-scout",
+      "description": "Mark a founder as approached — updates local DB and HubSpot lead status to CONTACTED",
+      "triggers": [
+        "i.*approached",
+        "approached.*founder",
+        "mark.*approached",
+        "reached.*out.*to"
+      ]
+    }
+  ]
+}

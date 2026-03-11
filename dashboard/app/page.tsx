@@ -10,6 +10,7 @@ import { TeamHeatmap } from "@/components/dashboard/TeamHeatmap"
 import { DealMovements } from "@/components/dashboard/DealMovements"
 import { MeetingPrep } from "@/components/dashboard/MeetingPrep"
 import { SignalFeed } from "@/components/dashboard/SignalFeed"
+import { LeadsPanel } from "@/components/dashboard/LeadsPanel"
 import { DealSources } from "@/components/dashboard/DealSources"
 import { ResponseTime } from "@/components/dashboard/ResponseTime"
 import { SignalConversion } from "@/components/dashboard/SignalConversion"
@@ -57,9 +58,11 @@ export default function DashboardPage() {
         <SignalConversion />
       </div>
 
-      {/* Signals */}
-      <div className="mb-8">
+      {/* Signals & Leads */}
+      <SectionHeader>Scouting</SectionHeader>
+      <div className="grid gap-6 lg:grid-cols-2 mb-8">
         <SignalFeed />
+        <LeadsPanel />
       </div>
 
       {/* Services */}
