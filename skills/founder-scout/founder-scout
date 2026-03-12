@@ -77,8 +77,36 @@ case "$ACTION" in
         /usr/bin/python3 "$SCRIPT" github-scan
         ;;
 
+    registrar-scan)
+        /usr/bin/python3 "$SCRIPT" registrar-scan
+        ;;
+
+    retention-update)
+        /usr/bin/python3 "$SCRIPT" retention-update
+        ;;
+
+    acquisition-scan)
+        /usr/bin/python3 "$SCRIPT" acquisition-scan
+        ;;
+
+    domain-scan)
+        /usr/bin/python3 "$SCRIPT" domain-scan
+        ;;
+
+    event-scan)
+        /usr/bin/python3 "$SCRIPT" event-scan
+        ;;
+
+    score-update)
+        /usr/bin/python3 "$SCRIPT" score-update
+        ;;
+
+    digest)
+        /usr/bin/python3 "$SCRIPT" digest
+        ;;
+
     *)
-        echo "Usage: founder-scout [scan|briefing|watchlist-update|github-scan|status|add|dismiss|sync-hubspot|approach|approach-id]"
+        echo "Usage: founder-scout [scan|briefing|watchlist-update|github-scan|registrar-scan|retention-update|acquisition-scan|domain-scan|event-scan|score-update|digest|status|add|dismiss|sync-hubspot|approach|approach-id]"
         exit 1
         ;;
 esac

@@ -1,26 +1,73 @@
 #!/usr/bin/env python3
 """
-Founder Scout — Proactive discovery of Israeli tech founders about to start new companies.
+Founder Scout — Automated discovery pipeline for Israeli tech founders about to start
+new companies. Built for GroundUp Ventures (first-check fund).
 
-Discovery is LinkedIn-only: searches LinkedIn people search via browser automation,
-then analyzes profiles with Claude for startup signals.
+How it works:
+
+  1. DISCOVER (daily scan)
+     Rotates through 8 LinkedIn keyword searches ("Israel founder stealth",
+     "Israel CTO building something new", etc.) using headless Chromium.
+     Two-phase filtering: fast keyword match on headlines, then full profile
+     visit + Claude analysis to confirm the person is genuinely starting
+     something new in the last ~6 months. Confirmed founders are automatically
+     added to the watchlist and the team gets an email + WhatsApp alert.
+
+  2. MONITOR (watchlist update, Tue/Thu/Sat)
+     Re-visits LinkedIn profiles of everyone on the watchlist. Claude checks
+     for changes since last scan: new role, stealth hints, fundraising signals,
+     company announcements. Also extracts GitHub URLs from profiles when found.
+
+  3. GITHUB SCAN (daily)
+     For tracked founders with a GitHub URL, checks the GitHub API for:
+     - New repos (scored HIGH if product-looking, MEDIUM otherwise)
+     - New GitHub orgs (HIGH — may indicate a new company)
+     - Activity spikes of 30+ events (MEDIUM)
+     Emails the team immediately on HIGH-tier GitHub signals.
+
+  4. SYNC TO CRM (daily, after scan)
+     Pushes all tracked people to HubSpot as lead contacts. Cross-references
+     against existing deals to auto-detect founders already approached.
+
+  5. WEEKLY BRIEFING (Sundays)
+     Compiles all HIGH and MEDIUM signals from the past 7 days into a
+     summary email.
+
+Data lives in SQLite (data/founder-scout.db). Signals are deduplicated
+within a 7-day window. LinkedIn browser runs as Christina Chang via
+OpenClaw browser automation.
 
 Actions:
-  scan              Run daily LinkedIn search rotation, detect signals, alert on high-tier
-  briefing          Compile and send weekly email + WhatsApp summary
-  watchlist-update  Re-scan existing tracked people via LinkedIn for new signals
-  github-scan       Scan GitHub activity of tracked founders (new repos, orgs, activity spikes)
-  status            Print tracked people and signal counts
-  add <name> [url]  Manually add a person to track
-  dismiss <id>      Mark a person as dismissed
-  sync-hubspot      Sync all tracked people to HubSpot as lead contacts
-  approach <name>   Mark a person as approached (updates DB + HubSpot)
+  scan              Daily LinkedIn search rotation + Claude analysis + alert
+  briefing          Weekly email summary of all signals
+  watchlist-update  Re-scan tracked people on LinkedIn for changes
+  github-scan       Enhanced GitHub scan (repos, orgs, infra, npm, activity)
+  registrar-scan    Scan Israeli Companies Registrar for new tech companies
+  retention-update  Update acquisition retention clocks
+  acquisition-scan  Search for new Israeli startup acquisitions (monthly)
+  domain-scan       Check domain registrations for watchlist members
+  event-scan        Search for watchlist members at startup events
+  score-update      Recalculate composite scores for all tracked people
+  digest            Send daily digest of CRITICAL/HIGH signals
+  sync-hubspot      Push tracked people to HubSpot as lead contacts
+  status            Print watchlist, scores, and signal counts
+  add <name> [url]  Manually add a person to the watchlist
+  dismiss <id>      Remove a person from the watchlist
+  approach <name>   Mark a person as approached (DB + HubSpot)
   approach-id <id>  Mark a person as approached by DB id
 
 Usage:
   python3 scout.py scan
   python3 scout.py briefing
   python3 scout.py watchlist-update
+  python3 scout.py github-scan
+  python3 scout.py registrar-scan
+  python3 scout.py retention-update
+  python3 scout.py acquisition-scan
+  python3 scout.py domain-scan
+  python3 scout.py event-scan
+  python3 scout.py score-update
+  python3 scout.py digest
   python3 scout.py status
   python3 scout.py add "Yossi Cohen" "https://linkedin.com/in/yossicohen"
   python3 scout.py dismiss 42
@@ -51,6 +98,37 @@ from lib.hubspot import (
     search_contact, create_contact, update_contact,
     search_company, create_company, associate_contact_company,
     fetch_deals_by_stage,
+)
+from lib.brave import brave_search
+
+# --- v2 Modules ---
+from modules.idf_classifier import (
+    classify_idf_unit, init_idf_tables, save_idf_profile, get_idf_profile, seed_company_mappings,
+)
+from modules.going_dark import (
+    init_activity_tables, extract_activity_metrics, save_activity_snapshot, detect_going_dark,
+)
+from modules.advisor_tracker import (
+    extract_advisory_roles, detect_advisory_accumulation, extract_verticals,
+)
+from modules.github_enhanced import enhanced_github_scan, search_github_user
+from modules.scoring import (
+    init_score_tables, calculate_composite_score, save_score, get_latest_score,
+    get_score_changes, classify as classify_score,
+)
+from modules.registrar import init_registrar_tables, scan_registrar
+from modules.retention_clock import (
+    init_retention_tables, update_all_statuses, get_approaching_founders,
+    scan_for_acquisitions, get_expiring_founders,
+)
+from modules.domain_monitor import init_domain_tables, scan_domains_for_person, save_domain_signal
+from modules.event_tracker import init_event_tables, scan_events
+from modules.social_graph import (
+    init_social_tables, extract_connections_from_profile, detect_lawyer_vc_connections,
+    detect_team_formation, scan_social_signals,
+)
+from modules.competitive_intel import (
+    init_competitive_tables, extract_vc_mentions_from_profile, scan_competitive_signals,
 )
 
 # --- Configuration ---
@@ -198,6 +276,28 @@ class ScoutDatabase:
                 c.execute('ALTER TABLE tracked_people ADD COLUMN github_url TEXT')
             if 'github_last_scanned' not in cols:
                 c.execute('ALTER TABLE tracked_people ADD COLUMN github_last_scanned TEXT')
+            # v2 columns
+            if 'advisory_count' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN advisory_count INTEGER DEFAULT 0')
+            if 'advisory_roles_json' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN advisory_roles_json TEXT')
+            if 'composite_score' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN composite_score INTEGER DEFAULT 0')
+            if 'score_classification' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN score_classification TEXT DEFAULT "WATCHING"')
+            conn.commit()
+
+            # Initialize v2 module tables
+            init_idf_tables(conn)
+            init_activity_tables(conn)
+            init_score_tables(conn)
+            init_registrar_tables(conn)
+            init_retention_tables(conn)
+            init_domain_tables(conn)
+            init_event_tables(conn)
+            init_social_tables(conn)
+            init_competitive_tables(conn)
+            seed_company_mappings(conn)
             conn.commit()
 
     def is_profile_sent(self, linkedin_url):
@@ -1098,6 +1198,71 @@ def run_watchlist_update():
                 db.set_github_url(person['id'], gh_url)
                 print(f"      Found GitHub: {gh_url}")
 
+        # --- v2 piggyback analysis (no extra LinkedIn requests) ---
+        try:
+            # IDF unit classification
+            idf_data = classify_idf_unit(profile_text, name)
+            if idf_data and idf_data.get('score', 0) >= 20:
+                with db._conn() as conn:
+                    save_idf_profile(conn, person['id'], idf_data)
+                    conn.commit()
+                print(f"      IDF: {idf_data.get('unit', '?')} ({idf_data.get('level', '?')})")
+
+            # Activity metrics for going-dark detection
+            metrics = extract_activity_metrics(profile_text)
+            if metrics:
+                with db._conn() as conn:
+                    save_activity_snapshot(conn, person['id'], metrics)
+                    conn.commit()
+                dark_signal = detect_going_dark(db._conn().__enter__(), person['id'])
+                if dark_signal:
+                    db.record_signal(person['id'], dark_signal['signal_type'],
+                                     dark_signal['tier'], dark_signal['description'], linkedin_url)
+                    new_signals += 1
+                    print(f"      Going dark: {dark_signal['description'][:60]}")
+
+            # Advisory role tracking
+            advisory_roles = extract_advisory_roles(profile_text)
+            prev_count = person.get('advisory_count', 0)
+            adv_signal = detect_advisory_accumulation(advisory_roles, prev_count)
+            if advisory_roles is not None:
+                with db._conn() as conn:
+                    conn.execute(
+                        'UPDATE tracked_people SET advisory_count = ?, advisory_roles_json = ? WHERE id = ?',
+                        (len(advisory_roles), json.dumps([r for r in advisory_roles if r.get('is_advisory')]),
+                         person['id'])
+                    )
+                    conn.commit()
+            if adv_signal and adv_signal['tier'] in ('high', 'medium'):
+                db.record_signal(person['id'], adv_signal['signal_type'],
+                                 adv_signal['tier'], adv_signal['description'], linkedin_url)
+                new_signals += 1
+                print(f"      Advisory: {adv_signal['description'][:60]}")
+
+            # Social graph: lawyer/VC connections
+            social_signals = detect_lawyer_vc_connections(profile_text, name)
+            for ss in social_signals:
+                db.record_signal(person['id'], ss.get('signal_type', 'social_connection'),
+                                 ss.get('tier', 'medium'), ss.get('description', ''), linkedin_url)
+                new_signals += 1
+
+            # Competitive intel: VC mentions in profile
+            vc_mentions = extract_vc_mentions_from_profile(profile_text)
+            if vc_mentions:
+                with db._conn() as conn:
+                    for vm in vc_mentions:
+                        conn.execute(
+                            '''INSERT INTO competitive_signals
+                               (person_id, vc_firm, vc_partner_name, signal_type, signal_detail, detected_date)
+                               VALUES (?, ?, ?, ?, ?, ?)''',
+                            (person['id'], vm.get('vc_firm', ''), vm.get('partner', ''),
+                             'linkedin_mention', vm.get('detail', ''), datetime.now().isoformat())
+                        )
+                    conn.commit()
+                print(f"      VC mentions: {len(vc_mentions)}")
+        except Exception as e:
+            print(f"      v2 analysis error: {e}", file=sys.stderr)
+
         # Claude analysis for change detection
         if claude_calls > 0:
             time.sleep(13)
@@ -1641,6 +1806,391 @@ def run_github_scan():
                 print(f"  Emailed {recip['first_name']}")
 
 
+# --- v2 Actions ---
+
+def run_registrar_scan():
+    """Scan Israeli Companies Registrar for new tech company registrations."""
+    print(f"[{datetime.now()}] Running Companies Registrar scan...")
+    db = ScoutDatabase(DB_PATH)
+    people = db.get_active_people()
+    with db._conn() as conn:
+        signals = scan_registrar(conn, people)
+        conn.commit()
+    for sig in signals:
+        person_id = sig.get('matched_person_id')
+        if person_id:
+            db.record_signal(person_id, 'company_registration', sig.get('tier', 'high'),
+                             sig['description'], sig.get('registration_number'))
+        print(f"  [{sig.get('tier', '?').upper()}] {sig['description'][:80]}")
+    print(f"  Registrar scan complete: {len(signals)} signals.")
+    db.log_scan('registrar_scan', signals_detected=len(signals))
+
+    # Immediate alert for company registration matches
+    high_signals = [s for s in signals if s.get('tier') == 'high']
+    if high_signals and SCOUT_RECIPIENTS:
+        subject = f"Company Registration Alert: {len(high_signals)} match{'es' if len(high_signals) > 1 else ''}"
+        body_lines = ["Israeli Company Registration Match", "=" * 35, ""]
+        for s in high_signals:
+            body_lines.append(f"- {s['description']}")
+            body_lines.append("")
+        for recip in SCOUT_RECIPIENTS:
+            send_email(recip['email'], subject, '\n'.join(body_lines))
+            send_whatsapp(recip['phone'], '\n'.join(body_lines))
+
+
+def run_retention_update():
+    """Recalculate retention clock statuses for all acquisition founders."""
+    print(f"[{datetime.now()}] Updating retention clocks...")
+    db = ScoutDatabase(DB_PATH)
+    with db._conn() as conn:
+        changes = update_all_statuses(conn)
+        conn.commit()
+    if changes:
+        for c in changes:
+            print(f"  Status change: {c.get('name', '?')} -> {c.get('new_status', '?')}")
+    approaching = []
+    with db._conn() as conn:
+        approaching = get_approaching_founders(conn)
+    print(f"  {len(approaching)} founders approaching/imminent vesting end.")
+
+    # Add approaching founders to watchlist if not already tracked
+    for f in approaching:
+        if f.get('founder_linkedin_url'):
+            existing = db.get_person_by_linkedin(f['founder_linkedin_url'])
+            if not existing:
+                person_id = db.add_person(f['founder_name'], f['founder_linkedin_url'], 'retention_clock')
+                if person_id:
+                    db.record_signal(person_id, 'retention_clock',
+                                     'high' if f.get('current_status') == 'IMMINENT' else 'medium',
+                                     f"Vesting {f.get('current_status', '?')} at {f.get('acquiring_company', '?')} (acquired {f.get('acquired_company', '?')})",
+                                     f.get('founder_linkedin_url'))
+                    print(f"  Added to watchlist: {f['founder_name']} ({f.get('current_status')})")
+
+    db.log_scan('retention_update', signals_detected=len(changes))
+
+
+def run_acquisition_scan():
+    """Monthly scan for new Israeli startup acquisitions via Brave Search."""
+    print(f"[{datetime.now()}] Scanning for new acquisitions...")
+    db = ScoutDatabase(DB_PATH)
+    with db._conn() as conn:
+        count = scan_for_acquisitions(conn, brave_search)
+        conn.commit()
+    print(f"  Found {count} new acquisitions.")
+    db.log_scan('acquisition_scan', people_found=count)
+
+
+def run_domain_scan():
+    """Check domain registrations for watchlist members."""
+    print(f"[{datetime.now()}] Running domain scan...")
+    db = ScoutDatabase(DB_PATH)
+    people = db.get_active_people()
+    total_signals = 0
+    for person in people:
+        name = person['name']
+        signals = scan_domains_for_person(name, person['id'], brave_search_fn=brave_search)
+        for sig in signals:
+            with db._conn() as conn:
+                save_domain_signal(conn, sig)
+                conn.commit()
+            if sig.get('signal_level') in ('HIGH', 'MEDIUM'):
+                db.record_signal(person['id'], 'domain_registration',
+                                 sig['signal_level'].lower(), sig.get('description', f"Domain: {sig.get('domain_name')}"))
+                total_signals += 1
+                print(f"  [{sig['signal_level']}] {person['name']}: {sig.get('domain_name')}")
+        time.sleep(0.5)  # Rate limiting for DNS lookups
+    print(f"  Domain scan complete: {total_signals} signals.")
+    db.log_scan('domain_scan', queries_run=len(people), signals_detected=total_signals)
+
+
+def run_event_scan():
+    """Weekly scan for watchlist members at startup events."""
+    print(f"[{datetime.now()}] Running event/hackathon scan...")
+    db = ScoutDatabase(DB_PATH)
+    people = db.get_active_people()
+    with db._conn() as conn:
+        signals = scan_events(conn, people, brave_search)
+        conn.commit()
+    for sig in signals:
+        person_id = sig.get('matched_person_id')
+        if person_id:
+            db.record_signal(person_id, 'event_appearance',
+                             sig.get('signal_level', 'medium').lower(),
+                             sig.get('description', ''))
+    print(f"  Event scan complete: {len(signals)} signals.")
+    db.log_scan('event_scan', signals_detected=len(signals))
+
+
+def run_score_update():
+    """Recalculate composite scores for all tracked people."""
+    print(f"[{datetime.now()}] Recalculating composite scores...")
+    db = ScoutDatabase(DB_PATH)
+    people = db.get_active_people()
+    since_30d = (datetime.now() - timedelta(days=30)).isoformat()
+
+    for person in people:
+        try:
+            # Gather all data for scoring
+            with db._conn() as conn:
+                signals = conn.execute(
+                    '''SELECT * FROM signal_history WHERE person_id = ? AND detected_at >= ?''',
+                    (person['id'], since_30d)
+                ).fetchall()
+                signals = [dict(zip([d[0] for d in conn.execute('PRAGMA table_info(signal_history)').fetchall()
+                                     if d[0]], r)) if not isinstance(r, dict) else r for r in signals]
+                # Simpler: just get as list of dicts
+                conn.row_factory = __import__('sqlite3').Row
+                signals = [dict(r) for r in conn.execute(
+                    'SELECT * FROM signal_history WHERE person_id = ? AND detected_at >= ?',
+                    (person['id'], since_30d)
+                ).fetchall()]
+
+                idf_data = get_idf_profile(conn, person['id'])
+
+            # Detect going dark status
+            going_dark = False
+            with db._conn() as conn:
+                dark = detect_going_dark(conn, person['id'])
+                if dark:
+                    going_dark = True
+
+            advisory_count = person.get('advisory_count', 0)
+
+            score_data = calculate_composite_score(
+                person_data=person,
+                signals=signals,
+                idf_data=idf_data,
+                going_dark=going_dark,
+                advisory_count=advisory_count,
+            )
+
+            with db._conn() as conn:
+                save_score(conn, person['id'], score_data)
+                conn.execute(
+                    'UPDATE tracked_people SET composite_score = ?, score_classification = ? WHERE id = ?',
+                    (score_data['composite_score'], score_data['classification'], person['id'])
+                )
+                conn.commit()
+
+            if score_data['classification'] in ('CRITICAL', 'HIGH'):
+                print(f"  {person['name']}: {score_data['composite_score']} ({score_data['classification']})")
+        except Exception as e:
+            print(f"  Score error for {person['name']}: {e}", file=sys.stderr)
+
+    # Check for classification changes
+    with db._conn() as conn:
+        changes = get_score_changes(conn, days=1)
+    if changes:
+        print(f"  Score changes today: {len(changes)}")
+
+    db.log_scan('score_update', queries_run=len(people))
+    print(f"  Score update complete for {len(people)} people.")
+
+
+def run_daily_digest():
+    """Send daily digest of CRITICAL and HIGH signals from the past 24 hours."""
+    print(f"[{datetime.now()}] Sending daily digest...")
+    db = ScoutDatabase(DB_PATH)
+    since = (datetime.now() - timedelta(hours=24)).isoformat()
+    recent_signals = db.get_signals_since(since)
+
+    # Get people with CRITICAL/HIGH scores
+    people = db.get_active_people()
+    critical = [p for p in people if p.get('score_classification') == 'CRITICAL']
+    high = [p for p in people if p.get('score_classification') == 'HIGH']
+
+    if not recent_signals and not critical:
+        print("  No signals or CRITICAL scores in the last 24h. Skipping digest.")
+        return
+
+    date_str = datetime.now().strftime('%b %d, %Y')
+    subject = f"Founder Scout Daily Digest - {date_str}"
+
+    for recipient in SCOUT_RECIPIENTS:
+        lines = [
+            f"Hi {recipient['first_name']},",
+            "",
+            f"Founder Scout digest for {date_str}.",
+            "",
+        ]
+
+        if critical:
+            lines.append("CRITICAL PRIORITY")
+            lines.append("=" * 40)
+            for p in critical:
+                score = p.get('composite_score', 0)
+                lines.append(f"  {p['name']} (score: {score})")
+                if p.get('last_signal'):
+                    lines.append(f"    Signal: {p['last_signal'][:80]}")
+                if p.get('linkedin_url'):
+                    lines.append(f"    {p['linkedin_url']}")
+                lines.append("")
+
+        if high:
+            lines.append("HIGH PRIORITY")
+            lines.append("-" * 40)
+            for p in high[:10]:
+                score = p.get('composite_score', 0)
+                lines.append(f"  {p['name']} (score: {score})")
+                if p.get('last_signal'):
+                    lines.append(f"    {p['last_signal'][:80]}")
+                lines.append("")
+
+        if recent_signals:
+            lines.append(f"Signals (last 24h): {len(recent_signals)}")
+            high_sigs = [s for s in recent_signals if s['signal_tier'] == 'high']
+            if high_sigs:
+                lines.append(f"  High: {len(high_sigs)}")
+                for s in high_sigs[:5]:
+                    lines.append(f"    - {s.get('name', '?')}: {s.get('description', '')[:60]}")
+            lines.append("")
+
+        # Retention clock
+        with db._conn() as conn:
+            imminent = get_expiring_founders(conn, status='IMMINENT')
+        if imminent:
+            lines.append("Retention Clocks - IMMINENT")
+            lines.append("-" * 40)
+            for f in imminent[:5]:
+                lines.append(f"  {f.get('founder_name', '?')} — {f.get('acquired_company', '?')} "
+                             f"(acquired by {f.get('acquiring_company', '?')})")
+            lines.append("")
+
+        lines.extend([
+            f"Watchlist: {len(people)} active",
+            f"CRITICAL: {len(critical)} | HIGH: {len(high)}",
+            "",
+            f"-- {config.assistant_name}",
+        ])
+
+        send_email(recipient['email'], subject, '\n'.join(lines))
+        print(f"  Sent digest to {recipient['first_name']}")
+
+    db.log_scan('daily_digest')
+
+
+def run_enhanced_github_scan():
+    """Enhanced GitHub scan with deep repo analysis, npm tracking, and infra detection."""
+    print(f"[{datetime.now()}] Running enhanced GitHub scan...")
+
+    db = ScoutDatabase(DB_PATH)
+    people = db.get_people_with_github()
+    github_token = os.environ.get('GITHUB_TOKEN', '')
+
+    if not people:
+        print("  No tracked people with GitHub URLs.")
+        db.log_scan('github_scan')
+        return
+
+    # Also try to find GitHub for people without URLs
+    no_github = [p for p in db.get_active_people() if not p.get('github_url')]
+    for person in no_github[:5]:  # Limit to 5 per run to avoid rate limits
+        gh_url = search_github_user(person['name'], token=github_token)
+        if gh_url:
+            db.set_github_url(person['id'], gh_url)
+            print(f"  Found GitHub for {person['name']}: {gh_url}")
+            people.append(person)
+
+    print(f"  Scanning {len(people)} GitHub profiles...")
+    total_signals = 0
+
+    for person in people:
+        name = person['name']
+        github_url = person.get('github_url')
+        if not github_url:
+            continue
+        username = github_username_from_url(github_url)
+        if not username:
+            continue
+
+        print(f"    {name} (@{username})...")
+        last_scanned = person.get('github_last_scanned')
+
+        # Use enhanced scan
+        signals = enhanced_github_scan(username, name, last_scanned, token=github_token)
+
+        for sig in signals:
+            db.record_signal(person['id'], sig['type'], sig['tier'], sig['description'], sig.get('url'))
+            total_signals += 1
+            print(f"      [{sig['tier'].upper()}] {sig['description'][:80]}")
+
+        db.update_github_scanned(person['id'])
+        time.sleep(1)
+
+    print(f"  Enhanced GitHub scan complete: {len(people)} profiles, {total_signals} signals.")
+    db.log_scan('github_scan', queries_run=len(people), signals_detected=total_signals)
+
+    # Immediate alerts for HIGH signals
+    if total_signals > 0:
+        recent = db.get_signals_since((datetime.now() - timedelta(minutes=10)).isoformat())
+        github_signals = [s for s in recent if s.get('signal_type', '').startswith('github_')]
+        high_signals = [s for s in github_signals if s['signal_tier'] == 'high']
+        if high_signals and SCOUT_RECIPIENTS:
+            subject = f"GitHub Alert: {len(high_signals)} new signal{'s' if len(high_signals) > 1 else ''}"
+            body_lines = ["GitHub Signals Detected", "=" * 25, ""]
+            for s in high_signals:
+                url = s.get('source_url', '')
+                body_lines.append(f"- {s['name']}: {s['description']}")
+                if url:
+                    body_lines.append(f"  {url}")
+                body_lines.append("")
+            for recip in SCOUT_RECIPIENTS:
+                send_email(recip['email'], subject, '\n'.join(body_lines))
+
+
+# --- Updated Status ---
+
+def run_status_v2():
+    """Enhanced status with composite scores."""
+    db = ScoutDatabase(DB_PATH)
+    stats = db.get_stats()
+    people = db.get_active_people()
+
+    print(f"Founder Scout v2 Status - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print("=" * 70)
+    print(f"  Active watchlist: {stats['active']}")
+    print(f"  Total signals: {stats['total_signals']}")
+    print(f"  Total scans: {stats['total_scans']}")
+
+    # Score distribution
+    critical = [p for p in people if p.get('score_classification') == 'CRITICAL']
+    high = [p for p in people if p.get('score_classification') == 'HIGH']
+    medium = [p for p in people if p.get('score_classification') == 'MEDIUM']
+    low = [p for p in people if p.get('score_classification') in ('LOW', 'WATCHING', None)]
+
+    print(f"\n  Score Distribution:")
+    print(f"    CRITICAL: {len(critical)} | HIGH: {len(high)} | MEDIUM: {len(medium)} | LOW/WATCHING: {len(low)}")
+
+    if critical:
+        print(f"\n  CRITICAL Priority:")
+        for p in critical:
+            score = p.get('composite_score', 0)
+            signal = p.get('last_signal', '')[:50]
+            li = f" {p['linkedin_url']}" if p.get('linkedin_url') else ""
+            print(f"    [{score}] {p['name']}{li}")
+            if signal:
+                print(f"          {signal}")
+
+    if high:
+        print(f"\n  HIGH Priority:")
+        for p in high:
+            score = p.get('composite_score', 0)
+            approached = " [approached]" if p.get('approached') else ""
+            print(f"    [{score}] {p['name']}{approached}")
+
+    # Retention clocks
+    with db._conn() as conn:
+        imminent = get_expiring_founders(conn, 'IMMINENT')
+        approaching = get_approaching_founders(conn)
+    if imminent or approaching:
+        print(f"\n  Retention Clocks:")
+        for f in imminent:
+            print(f"    IMMINENT: {f.get('founder_name', '?')} ({f.get('acquired_company', '?')})")
+        for f in approaching:
+            if f.get('current_status') != 'IMMINENT':
+                print(f"    APPROACHING: {f.get('founder_name', '?')} ({f.get('acquired_company', '?')})")
+
+
 # --- Entry Point ---
 
 def main():
@@ -1670,7 +2220,7 @@ def main():
         run_watchlist_update()
 
     elif action == 'status':
-        run_status()
+        run_status_v2()
 
     elif action == 'add':
         if len(sys.argv) < 3:
@@ -1702,7 +2252,28 @@ def main():
         run_approach_by_id(sys.argv[2])
 
     elif action == 'github-scan':
-        run_github_scan()
+        run_enhanced_github_scan()
+
+    elif action == 'registrar-scan':
+        run_registrar_scan()
+
+    elif action == 'retention-update':
+        run_retention_update()
+
+    elif action == 'acquisition-scan':
+        run_acquisition_scan()
+
+    elif action == 'domain-scan':
+        run_domain_scan()
+
+    elif action == 'event-scan':
+        run_event_scan()
+
+    elif action == 'score-update':
+        run_score_update()
+
+    elif action == 'digest':
+        run_daily_digest()
 
     else:
         print(f"Unknown action: {action}")
