@@ -1351,12 +1351,37 @@ def process_email(thread):
         mark_email_processed(thread_id)
         return False
 
+    # Check if sender explicitly asked for portfolio logging
+    explicit_portfolio = bool(re.search(r'portfolio\s*(update|monitoring|company|log)', f'{subject} {body}', re.IGNORECASE))
+
     # Check if this is a portfolio company update (not a deal)
     portfolio_result = handle_portfolio_email(sender_email, subject, body)
     if portfolio_result:
+        if portfolio_result.get('ask_sender'):
+            # Portfolio company recognized but not in HubSpot — ask sender via WhatsApp + email
+            company = portfolio_result.get('company_name', '?')
+            sender_phone = EMAIL_TO_PHONE.get(sender_email)
+            msg = f"I got your email about {company}. It looks like a portfolio update but I can't find {company} in HubSpot. Should I create it as a portfolio company, or log it as a new deal?"
+            if sender_phone:
+                send_whatsapp(sender_phone, msg)
+            send_email_simple(sender_email, f"Re: {subject}", msg + "\n\n- Christina")
+            print(f'  Asked sender about portfolio company: {company}')
+            mark_email_processed(thread_id)
+            return False
         print(f'  Handled as portfolio update for {portfolio_result["company_name"]}')
         mark_email_processed(thread_id)
         return True
+
+    # If sender explicitly said "portfolio" but we couldn't match a company, ask which one
+    if explicit_portfolio and not portfolio_result:
+        sender_phone = EMAIL_TO_PHONE.get(sender_email)
+        msg = f"You mentioned this is a portfolio update, but I couldn't match it to a portfolio company. Which company is this for?"
+        if sender_phone:
+            send_whatsapp(sender_phone, msg)
+        send_email_simple(sender_email, f"Re: {subject}", msg + "\n\n- Christina")
+        print(f'  Asked sender to clarify portfolio company')
+        mark_email_processed(thread_id)
+        return False
 
     is_lp = is_lp_email(subject, body)
 
@@ -1516,6 +1541,19 @@ def process_email(thread):
             return False
 
     deal_name = company_data['name']
+
+    # Check for existing deal before creating a duplicate
+    existing_deal_id = search_hubspot_deal(deal_name)
+    if existing_deal_id:
+        existing_deal_url = f'https://app.hubspot.com/contacts/{config.hubspot_portal_id}/record/0-3/{existing_deal_id}'
+        print(f'  Deal already exists: {deal_name} (ID: {existing_deal_id})')
+        sender_phone = EMAIL_TO_PHONE.get(sender_email)
+        if sender_phone:
+            send_whatsapp(sender_phone, f"I got your email about {deal_name}, but there's already a deal in HubSpot:\n{existing_deal_url}\n\nShould I update it or create a new one?")
+            print(f'  Asked sender about existing deal')
+        mark_email_processed(thread_id)
+        return True
+
     deal_id = create_hubspot_deal(deal_name, company_id, sender_email, pipeline_id, stage_id)
 
     if deal_id:
