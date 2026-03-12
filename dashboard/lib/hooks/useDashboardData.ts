@@ -78,6 +78,7 @@ export function useSignals() {
         timestamp: string
         source: string
         linkedinUrl: string | null
+        githubUrl: string | null
         approached: boolean
       }>
     }>("/api/signals"),

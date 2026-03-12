@@ -73,8 +73,12 @@ case "$ACTION" in
         /usr/bin/python3 "$SCRIPT" approach-id "$PERSON_ID"
         ;;
 
+    github-scan)
+        /usr/bin/python3 "$SCRIPT" github-scan
+        ;;
+
     *)
-        echo "Usage: founder-scout [scan|briefing|watchlist-update|status|add|dismiss|sync-hubspot|approach|approach-id]"
+        echo "Usage: founder-scout [scan|briefing|watchlist-update|github-scan|status|add|dismiss|sync-hubspot|approach|approach-id]"
         exit 1
         ;;
 esac

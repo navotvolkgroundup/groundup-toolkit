@@ -14,6 +14,7 @@ interface Signal {
   timestamp: string
   source: string
   linkedinUrl: string | null
+  githubUrl: string | null
   approached: boolean
 }
 
@@ -48,6 +49,7 @@ print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], 
         timestamp: new Date(r.last_scanned).toISOString(),
         source: r.linkedin_url ? "LinkedIn" : r.github_url ? "GitHub" : "LinkedIn",
         linkedinUrl: r.linkedin_url || null,
+        githubUrl: r.github_url || null,
         approached: !!r.approached,
       }))
     }
@@ -92,6 +94,7 @@ print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], 
           timestamp: currentTimestamp,
           source: "LinkedIn",
           linkedinUrl: null,
+          githubUrl: null,
           approached: false,
         })
         continue
@@ -108,6 +111,7 @@ print(json.dumps([dict(id=r[0], name=r[1], linkedin_url=r[2], signal_tier=r[3], 
           timestamp: currentTimestamp,
           source: "LinkedIn",
           linkedinUrl: null,
+          githubUrl: null,
           approached: false,
         })
         continue

@@ -9,6 +9,7 @@ Actions:
   scan              Run daily LinkedIn search rotation, detect signals, alert on high-tier
   briefing          Compile and send weekly email + WhatsApp summary
   watchlist-update  Re-scan existing tracked people via LinkedIn for new signals
+  github-scan       Scan GitHub activity of tracked founders (new repos, orgs, activity spikes)
   status            Print tracked people and signal counts
   add <name> [url]  Manually add a person to track
   dismiss <id>      Mark a person as dismissed
@@ -191,6 +192,12 @@ class ScoutDatabase:
                 c.execute('ALTER TABLE tracked_people ADD COLUMN approached INTEGER DEFAULT 0')
             if 'approached_at' not in cols:
                 c.execute('ALTER TABLE tracked_people ADD COLUMN approached_at TEXT')
+            if 'headline' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN headline TEXT')
+            if 'github_url' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN github_url TEXT')
+            if 'github_last_scanned' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN github_last_scanned TEXT')
             conn.commit()
 
     def is_profile_sent(self, linkedin_url):
@@ -368,6 +375,32 @@ class ScoutDatabase:
                      added_at DESC
                    LIMIT ?''',
                 (limit,)
+            ).fetchall()
+        return [dict(r) for r in results]
+
+    def set_github_url(self, person_id, github_url):
+        with self._conn() as conn:
+            conn.execute(
+                'UPDATE tracked_people SET github_url = ? WHERE id = ?',
+                (github_url, person_id)
+            )
+            conn.commit()
+
+    def update_github_scanned(self, person_id):
+        with self._conn() as conn:
+            conn.execute(
+                'UPDATE tracked_people SET github_last_scanned = ? WHERE id = ?',
+                (datetime.now().isoformat(), person_id)
+            )
+            conn.commit()
+
+    def get_people_with_github(self):
+        """Get active people who have a GitHub URL."""
+        with self._conn() as conn:
+            conn.row_factory = sqlite3.Row
+            results = conn.execute(
+                "SELECT * FROM tracked_people WHERE status = 'active' AND github_url IS NOT NULL ORDER BY github_last_scanned ASC NULLS FIRST",
+                ()
             ).fetchall()
         return [dict(r) for r in results]
 
@@ -900,6 +933,11 @@ def run_daily_scan():
             print(f"      RELEVANT: {summary}")
             p['analysis_summary'] = summary
             p['current_title'] = title
+            # Extract GitHub URL from profile
+            gh_url = extract_github_from_linkedin(profile_text)
+            if gh_url:
+                p['github_url'] = gh_url
+                print(f"      Found GitHub: {gh_url}")
             relevant.append(p)
         else:
             summary = analysis.get('summary', 'Not relevant')
@@ -1027,6 +1065,13 @@ def run_watchlist_update():
                 )
                 conn.commit()
             continue
+
+        # Extract GitHub URL from LinkedIn profile if not already known
+        if not person.get('github_url'):
+            gh_url = extract_github_from_linkedin(profile_text)
+            if gh_url:
+                db.set_github_url(person['id'], gh_url)
+                print(f"      Found GitHub: {gh_url}")
 
         # Claude analysis for change detection
         if claude_calls > 0:
@@ -1319,6 +1364,258 @@ def run_approach_by_id(person_id):
         print(f"  HubSpot contact {hubspot_id} updated: hs_lead_status → ATTEMPTED_TO_CONTACT")
 
 
+# --- GitHub Scanning ---
+
+GITHUB_API_BASE = "https://api.github.com"
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')  # Optional, for higher rate limits
+
+def _github_headers():
+    headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'GroundUp-FounderScout'}
+    if GITHUB_TOKEN:
+        headers['Authorization'] = f'Bearer {GITHUB_TOKEN}'
+    return headers
+
+
+def github_username_from_url(url):
+    """Extract GitHub username from a URL like https://github.com/username."""
+    if not url:
+        return None
+    m = re.match(r'https?://github\.com/([A-Za-z0-9_-]+)/?$', url.strip())
+    return m.group(1) if m else None
+
+
+def github_fetch_events(username, max_pages=2):
+    """Fetch recent public events for a GitHub user."""
+    events = []
+    for page in range(1, max_pages + 1):
+        try:
+            resp = requests.get(
+                f"{GITHUB_API_BASE}/users/{username}/events/public?per_page=100&page={page}",
+                headers=_github_headers(), timeout=10
+            )
+            if resp.status_code == 404:
+                print(f"    GitHub user {username}: not found", file=sys.stderr)
+                return []
+            if resp.status_code == 403:
+                print(f"    GitHub API rate limited", file=sys.stderr)
+                return events
+            if resp.status_code != 200:
+                print(f"    GitHub API error: {resp.status_code}", file=sys.stderr)
+                return events
+            page_events = resp.json()
+            if not page_events:
+                break
+            events.extend(page_events)
+        except Exception as e:
+            print(f"    GitHub fetch error: {e}", file=sys.stderr)
+            break
+    return events
+
+
+def github_fetch_repos(username, sort='created', per_page=10):
+    """Fetch recent repos for a GitHub user, sorted by creation date."""
+    try:
+        resp = requests.get(
+            f"{GITHUB_API_BASE}/users/{username}/repos?sort={sort}&direction=desc&per_page={per_page}&type=owner",
+            headers=_github_headers(), timeout=10
+        )
+        if resp.status_code != 200:
+            return []
+        return resp.json()
+    except Exception:
+        return []
+
+
+def github_fetch_orgs(username):
+    """Fetch public organizations for a GitHub user."""
+    try:
+        resp = requests.get(
+            f"{GITHUB_API_BASE}/users/{username}/orgs",
+            headers=_github_headers(), timeout=10
+        )
+        if resp.status_code != 200:
+            return []
+        return resp.json()
+    except Exception:
+        return []
+
+
+def analyze_github_activity(username, person_name, last_scanned=None):
+    """
+    Analyze a GitHub user's recent activity for startup signals.
+
+    Returns list of signals: [{"type": "...", "tier": "high|medium|low", "description": "...", "url": "..."}]
+    """
+    signals = []
+    cutoff = datetime.fromisoformat(last_scanned) if last_scanned else datetime.now() - timedelta(days=30)
+
+    # 1. Check for new repos (strongest signal)
+    repos = github_fetch_repos(username, sort='created', per_page=20)
+    new_repos = []
+    for repo in repos:
+        created = datetime.fromisoformat(repo['created_at'].replace('Z', '+00:00')).replace(tzinfo=None)
+        if created > cutoff and not repo.get('fork'):
+            new_repos.append(repo)
+
+    for repo in new_repos:
+        name = repo['name']
+        desc = repo.get('description') or ''
+        lang = repo.get('language') or ''
+        stars = repo.get('stargazers_count', 0)
+        has_pages = repo.get('has_pages', False)
+        homepage = repo.get('homepage') or ''
+        repo_url = repo['html_url']
+
+        # Score the repo — is this a product/startup or just a personal project?
+        is_product = False
+        product_hints = ['landing', 'website', 'app', 'platform', 'api', 'sdk', 'saas', 'demo']
+        if any(h in name.lower() or h in desc.lower() for h in product_hints):
+            is_product = True
+        if has_pages or (homepage and 'github.io' not in homepage):
+            is_product = True
+        if stars >= 5:
+            is_product = True
+
+        # High tier: product-looking repo with description or custom domain
+        if is_product and (desc or homepage):
+            tier = 'high'
+            description = f"New repo '{name}'"
+            if desc:
+                description += f": {desc[:100]}"
+            if homepage:
+                description += f" ({homepage})"
+            signals.append({'type': 'github_new_repo', 'tier': tier, 'description': description, 'url': repo_url})
+        elif desc or lang:
+            tier = 'medium'
+            description = f"New repo '{name}'"
+            if desc:
+                description += f": {desc[:100]}"
+            elif lang:
+                description += f" ({lang})"
+            signals.append({'type': 'github_new_repo', 'tier': tier, 'description': description, 'url': repo_url})
+        else:
+            # Bare repo, low signal
+            signals.append({'type': 'github_new_repo', 'tier': 'low', 'description': f"New repo '{name}'", 'url': repo_url})
+
+    # 2. Check for new organizations (strong signal — might be a new company)
+    orgs = github_fetch_orgs(username)
+    for org in orgs:
+        org_url = f"https://github.com/{org['login']}"
+        # We can't easily tell when they joined, so check org creation date
+        try:
+            org_resp = requests.get(
+                f"{GITHUB_API_BASE}/orgs/{org['login']}",
+                headers=_github_headers(), timeout=10
+            )
+            if org_resp.status_code == 200:
+                org_data = org_resp.json()
+                created = datetime.fromisoformat(org_data['created_at'].replace('Z', '+00:00')).replace(tzinfo=None)
+                if created > cutoff:
+                    desc = org_data.get('description') or org_data.get('name', org['login'])
+                    signals.append({
+                        'type': 'github_new_org',
+                        'tier': 'high',
+                        'description': f"New GitHub org '{org['login']}': {desc[:100]}",
+                        'url': org_url,
+                    })
+        except Exception:
+            pass
+
+    # 3. Detect activity spikes from events
+    events = github_fetch_events(username, max_pages=1)
+    recent_events = [
+        e for e in events
+        if datetime.fromisoformat(e['created_at'].replace('Z', '+00:00')).replace(tzinfo=None) > cutoff
+    ]
+
+    if len(recent_events) >= 30:
+        # Activity spike — 30+ events since last scan
+        event_types = {}
+        for e in recent_events:
+            event_types[e['type']] = event_types.get(e['type'], 0) + 1
+        top_types = sorted(event_types.items(), key=lambda x: -x[1])[:3]
+        summary = ', '.join(f"{count} {t.replace('Event','')}" for t, count in top_types)
+        signals.append({
+            'type': 'github_activity_spike',
+            'tier': 'medium',
+            'description': f"GitHub activity spike: {len(recent_events)} events ({summary})",
+            'url': f"https://github.com/{username}",
+        })
+
+    return signals
+
+
+def extract_github_from_linkedin(profile_text):
+    """Try to extract a GitHub URL from LinkedIn profile text."""
+    if not profile_text:
+        return None
+    m = re.search(r'(https?://github\.com/[A-Za-z0-9_-]+)(?:\s|$|[)\]<])', profile_text)
+    return m.group(1) if m else None
+
+
+def run_github_scan():
+    """Scan GitHub activity of tracked founders who have GitHub URLs."""
+    print(f"[{datetime.now()}] Running Founder Scout GitHub scan...")
+
+    db = ScoutDatabase(DB_PATH)
+    people = db.get_people_with_github()
+
+    if not people:
+        print("  No tracked people with GitHub URLs.")
+        print("  Tip: GitHub URLs are extracted from LinkedIn profiles during watchlist-update.")
+        db.log_scan('github_scan')
+        return
+
+    print(f"  Scanning {len(people)} GitHub profiles...")
+    total_signals = 0
+
+    for person in people:
+        name = person['name']
+        github_url = person['github_url']
+        username = github_username_from_url(github_url)
+        if not username:
+            print(f"    {name}: invalid GitHub URL '{github_url}', skipping")
+            continue
+
+        print(f"    [{person['id']}] {name} (@{username})...")
+        last_scanned = person.get('github_last_scanned')
+
+        signals = analyze_github_activity(username, name, last_scanned)
+
+        for sig in signals:
+            db.record_signal(person['id'], sig['type'], sig['tier'], sig['description'], sig.get('url'))
+            total_signals += 1
+            tier_label = sig['tier'].upper()
+            print(f"      [{tier_label}] {sig['description'][:80]}")
+
+        db.update_github_scanned(person['id'])
+        time.sleep(1)  # Be polite to GitHub API
+
+    print(f"  GitHub scan complete: {len(people)} profiles, {total_signals} signals detected.")
+    db.log_scan('github_scan', queries_run=len(people), signals_detected=total_signals)
+
+    # Send alerts for high-tier GitHub signals
+    if total_signals > 0:
+        recent = db.get_signals_since((datetime.now() - timedelta(minutes=10)).isoformat())
+        github_signals = [s for s in recent if s.get('signal_type', '').startswith('github_')]
+        high_signals = [s for s in github_signals if s['signal_tier'] == 'high']
+
+        if high_signals and SCOUT_RECIPIENTS:
+            subject = f"🐙 GitHub Alert: {len(high_signals)} new signal{'s' if len(high_signals) > 1 else ''}"
+            body_lines = [f"<h3>GitHub Signals Detected</h3>"]
+            for s in high_signals:
+                url = s.get('source_url', '')
+                body_lines.append(
+                    f"<p><b>{s['name']}</b>: {s['description']}"
+                    + (f' — <a href="{url}">{url}</a>' if url else '')
+                    + "</p>"
+                )
+
+            for recip in SCOUT_RECIPIENTS:
+                send_email(recip['email'], subject, '\n'.join(body_lines))
+                print(f"  Emailed {recip['first_name']}")
+
+
 # --- Entry Point ---
 
 def main():
@@ -1378,6 +1675,9 @@ def main():
             print("Usage: scout.py approach-id <id>")
             sys.exit(1)
         run_approach_by_id(sys.argv[2])
+
+    elif action == 'github-scan':
+        run_github_scan()
 
     else:
         print(f"Unknown action: {action}")
