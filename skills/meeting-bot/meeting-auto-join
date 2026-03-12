@@ -20,6 +20,9 @@ from datetime import datetime, timedelta, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from lib.config import config
 from lib.gws import gws_calendar_events
+from lib.whatsapp import send_whatsapp
+
+ALERT_PHONE = config.alert_phone
 _TOOLKIT_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 _DATA_DIR = os.path.join(_TOOLKIT_ROOT, 'data')
 JOINED_FILE = os.path.join(_DATA_DIR, 'bot-joined-meetings.json')
@@ -83,7 +86,7 @@ def get_upcoming_meetings():
     time_max = now.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%dT%H:%M:%SZ')
     events = gws_calendar_events(calendar_id, time_min, time_max)
     window_start = now - timedelta(minutes=2)
-    window_end = now + timedelta(minutes=5)
+    window_end = now + timedelta(minutes=8)
 
     upcoming = []
     for event in events:
@@ -236,7 +239,19 @@ def main():
         if success:
             log(f"Successfully started joining: {title}")
         else:
-            log(f"Failed to join: {title}")
+            # Retry once after 10 seconds
+            log(f"First attempt failed, retrying in 10s...")
+            import time
+            time.sleep(10)
+            success = join_meeting(meet_url, event, title)
+            if success:
+                log(f"Retry succeeded: {title}")
+            else:
+                log(f"Failed to join after retry: {title}")
+                try:
+                    send_whatsapp(ALERT_PHONE, f"Christina couldn't join meeting: {title}. Browser session may need refreshing.")
+                except Exception as e:
+                    log(f"Failed to send alert: {e}")
 
     log("Done")
 

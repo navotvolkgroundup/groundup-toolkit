@@ -702,9 +702,35 @@ function getExpectedAttendees() {
 
         const url = page.url();
         if (url.includes("accounts.google.com")) {
-            console.log("ERROR: Redirected to Google login - cookies may be expired");
-            await screenshot("error-login");
-            process.exit(1);
+            console.log("WARN: Redirected to Google login - attempting cookie re-injection...");
+            await screenshot("error-login-before-retry");
+
+            // Try re-injecting cookies from file
+            try {
+                if (fs.existsSync(COOKIES_PATH)) {
+                    const rawCookies = JSON.parse(fs.readFileSync(COOKIES_PATH, "utf8"));
+                    const playwrightCookies = convertCookies(rawCookies);
+                    await context.addCookies(playwrightCookies);
+                    console.log("Re-injected " + playwrightCookies.length + " cookies, retrying navigation...");
+                    await page.goto(MEETING_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+                    await sleep(5000);
+
+                    const retryUrl = page.url();
+                    if (retryUrl.includes("accounts.google.com")) {
+                        console.log("ERROR: Still redirected to login after cookie re-injection - cookies are expired");
+                        await screenshot("error-login-after-retry");
+                        process.exit(1);
+                    }
+                    console.log("Cookie re-injection worked, continuing...");
+                } else {
+                    console.log("ERROR: No cookie file found at " + COOKIES_PATH);
+                    process.exit(1);
+                }
+            } catch (cookieErr) {
+                console.log("ERROR: Cookie re-injection failed: " + cookieErr.message);
+                await screenshot("error-cookie-retry");
+                process.exit(1);
+            }
         }
 
         console.log("Muting microphone and camera...");

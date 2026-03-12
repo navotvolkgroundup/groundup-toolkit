@@ -1073,7 +1073,7 @@ def run_daily_scan():
     # Send results to team
     if relevant:
         date_str = datetime.now().strftime('%b %d, %Y')
-        subject = f"Founder Scout — {date_str}"
+        subject = f"Founder Scout - {date_str}"
 
         print(f"\n  Sending results ({len(relevant)} people) to team...")
         for recipient in SCOUT_RECIPIENTS:
@@ -1082,6 +1082,38 @@ def run_daily_scan():
 
             wa_message = format_scan_whatsapp(recipient['first_name'], relevant)
             send_whatsapp(recipient['phone'], wa_message)
+        # Push to HubSpot as leads
+        print(f"\n  Syncing {len(relevant)} leads to HubSpot...")
+        for p in relevant:
+            name = p.get('name', '')
+            url = p.get('url', '')
+            parts = name.split(None, 1)
+            firstname = parts[0] if parts else name
+            lastname = parts[1] if len(parts) > 1 else ''
+
+            # Check if already exists
+            existing = None
+            if url:
+                existing = search_contact(linkedin_url=url)
+            if not existing:
+                existing = search_contact(name=name)
+
+            if existing:
+                hubspot_id = existing['id']
+                print(f"    {name}: already in HubSpot ({hubspot_id})")
+            else:
+                hubspot_id = create_contact(firstname, lastname, url, {'lifecyclestage': 'lead', 'hs_lead_status': 'NEW'})
+                if hubspot_id:
+                    print(f"    {name}: created in HubSpot ({hubspot_id})")
+                else:
+                    print(f"    {name}: failed to create in HubSpot", file=sys.stderr)
+                    continue
+
+            # Link to tracked person in local DB
+            person = db.get_person_by_linkedin(url) if url else None
+            person_id = person['id'] if person else None
+            if person_id and hubspot_id:
+                db.set_hubspot_contact_id(person_id, str(hubspot_id))
     else:
         print("\n  No relevant profiles after deep analysis, skipping email.")
 
@@ -1104,7 +1136,7 @@ def run_weekly_briefing():
     stats = {'active': db_stats['active']}
 
     week_str = datetime.now().strftime('%b %d, %Y')
-    subject = f"Founder Scout Weekly — {week_str}"
+    subject = f"Founder Scout Weekly - {week_str}"
 
     for recipient in SCOUT_RECIPIENTS:
         email_body = format_briefing_email(
