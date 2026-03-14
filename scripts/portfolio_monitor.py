@@ -94,6 +94,114 @@ PORTFOLIO = {
     "postmoda.com":          "Postmoda (fka Wardrobe)",
 }
 
+PORTFOLIO_CACHE_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'portfolio-domains-cache.json')
+PORTFOLIO_CACHE_TTL = 86400  # 24 hours
+
+
+def _load_portfolio_cache() -> dict:
+    """Load cached portfolio domains if fresh (< 24h). Returns empty dict if stale/missing."""
+    try:
+        with open(PORTFOLIO_CACHE_PATH, 'r') as f:
+            cache = json.load(f)
+        if time.time() - cache.get("timestamp", 0) < PORTFOLIO_CACHE_TTL:
+            return cache.get("domains", {})
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
+    return {}
+
+
+def sync_portfolio_from_hubspot() -> dict:
+    """Fetch all Portfolio Monitoring deals from HubSpot, resolve associated company domains.
+
+    Returns:
+        dict of {domain: company_name} for all portfolio deals with a domain set.
+        Also writes the result to the cache file.
+    """
+    domains = {}
+
+    # Step 1: Search for all deals in Portfolio Monitoring stage
+    try:
+        resp = requests.post(
+            f"{BASE}/crm/v3/objects/deals/search",
+            headers=HEADERS,
+            json={
+                "filterGroups": [{"filters": [{"propertyName": "dealstage", "operator": "EQ", "value": PORTFOLIO_STAGE_ID}]}],
+                "properties": ["dealname"],
+                "limit": 100,
+            },
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            print(f"  Failed to fetch portfolio deals: {resp.status_code}")
+            return domains
+        deals = resp.json().get("results", [])
+    except Exception as e:
+        print(f"  Error fetching portfolio deals: {e}")
+        return domains
+
+    print(f"  Found {len(deals)} deals in Portfolio Monitoring stage")
+
+    # Step 2: For each deal, get associated company and its domain
+    for deal in deals:
+        deal_id = deal["id"]
+        deal_name = deal.get("properties", {}).get("dealname", "?")
+        try:
+            # Get associated companies
+            assoc_resp = requests.get(
+                f"{BASE}/crm/v4/objects/deals/{deal_id}/associations/companies",
+                headers=HEADERS, timeout=10,
+            )
+            if assoc_resp.status_code != 200:
+                continue
+            assoc_results = assoc_resp.json().get("results", [])
+            if not assoc_results:
+                continue
+
+            company_id = assoc_results[0]["toObjectId"]
+
+            # Get company details
+            co_resp = requests.get(
+                f"{BASE}/crm/v3/objects/companies/{company_id}",
+                headers=HEADERS,
+                params={"properties": "name,domain"},
+                timeout=10,
+            )
+            if co_resp.status_code != 200:
+                continue
+            props = co_resp.json().get("properties", {})
+            domain = (props.get("domain") or "").strip().lower()
+            name = (props.get("name") or "").strip()
+
+            if domain and name:
+                # Normalize: strip www. prefix
+                domain = re.sub(r'^www\.', '', domain)
+                domains[domain] = name
+                print(f"    {deal_name} → {name} ({domain})")
+            else:
+                print(f"    {deal_name} → skipped (domain={domain!r}, name={name!r})")
+        except Exception as e:
+            print(f"    Error processing deal {deal_id}: {e}")
+
+    # Step 3: Write cache
+    try:
+        cache_data = {"timestamp": time.time(), "domains": domains}
+        os.makedirs(os.path.dirname(PORTFOLIO_CACHE_PATH), exist_ok=True)
+        with open(PORTFOLIO_CACHE_PATH, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+        print(f"  Cached {len(domains)} domains to {PORTFOLIO_CACHE_PATH}")
+    except Exception as e:
+        print(f"  Warning: could not write cache: {e}")
+
+    return domains
+
+
+# Merge cached HubSpot domains into PORTFOLIO (hardcoded values take precedence)
+_cached_domains = _load_portfolio_cache()
+if _cached_domains:
+    for _domain, _name in _cached_domains.items():
+        if _domain not in PORTFOLIO:
+            PORTFOLIO[_domain] = _name
+
 COMPANY_TO_DOMAIN = {v: k for k, v in PORTFOLIO.items()}
 
 
@@ -510,13 +618,17 @@ def get_portfolio_summary(company_name: str) -> str:
 
 
 if __name__ == "__main__":
-    # Test domain lookup
-    print("Testing domain lookup:")
-    for test in ["ceo@portless.com", "update@triplewhale.com", "unknown@example.com"]:
-        result = lookup_domain(test)
-        print(f"  {test} → {result}")
+    if len(sys.argv) > 1 and sys.argv[1] == 'sync':
+        result = sync_portfolio_from_hubspot()
+        print(f"Synced {len(result)} portfolio domains from HubSpot")
+    else:
+        # Test domain lookup
+        print("Testing domain lookup:")
+        for test in ["ceo@portless.com", "update@triplewhale.com", "unknown@example.com"]:
+            result = lookup_domain(test)
+            print(f"  {test} → {result}")
 
-    print("\nTesting fuzzy name lookup:")
-    for test in ["portless", "Triple Whale", "StarCloud", "unknownco"]:
-        result = fuzzy_lookup_name(test)
-        print(f"  {test} → {result}")
+        print("\nTesting fuzzy name lookup:")
+        for test in ["portless", "Triple Whale", "StarCloud", "unknownco"]:
+            result = fuzzy_lookup_name(test)
+            print(f"  {test} → {result}")
