@@ -77,7 +77,7 @@ def _check_rate_limit(response):
         remaining = int(remaining)
         if remaining <= 5:
             reset_ts = response.headers.get('X-RateLimit-Reset', '0')
-            reset_at = datetime.utcfromtimestamp(int(reset_ts)).strftime('%H:%M:%S UTC')
+            reset_at = datetime.fromtimestamp(int(reset_ts), tz=timezone.utc).strftime('%H:%M:%S UTC')
             print(f"[github_enhanced] WARNING: Rate limit nearly exhausted ({remaining} left, resets at {reset_at})", file=sys.stderr)
             if remaining == 0:
                 return False
@@ -303,7 +303,7 @@ def analyze_activity_baseline(events, previous_event_count=None):
     for event in events:
         created = event.get('created_at', '')
         try:
-            event_dt = datetime.strptime(created, '%Y-%m-%dT%H:%M:%SZ')
+            event_dt = datetime.strptime(created, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
         except (ValueError, TypeError):
             continue
         age = (now - event_dt).days
@@ -369,7 +369,7 @@ def check_npm_publications(username, token=None):
 
         if date_str:
             try:
-                pub_date = datetime.strptime(date_str[:19], '%Y-%m-%dT%H:%M:%S')
+                pub_date = datetime.strptime(date_str[:19], '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
                 if pub_date >= cutoff:
                     results.append({
                         'package_name': name,
@@ -408,7 +408,7 @@ def enhanced_github_scan(username, person_name, last_scanned=None, token=None):
     # Determine recency cutoff
     if last_scanned:
         try:
-            cutoff = datetime.strptime(last_scanned, '%Y-%m-%dT%H:%M:%SZ')
+            cutoff = datetime.strptime(last_scanned, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
         except (ValueError, TypeError):
             cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     else:
@@ -450,7 +450,7 @@ def enhanced_github_scan(username, person_name, last_scanned=None, token=None):
     for repo in repos:
         created = repo.get('created_at', '')
         try:
-            repo_created = datetime.strptime(created, '%Y-%m-%dT%H:%M:%SZ')
+            repo_created = datetime.strptime(created, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
         except (ValueError, TypeError):
             continue
 

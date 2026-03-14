@@ -53,10 +53,11 @@ def run_sync_hubspot(db, SCOUT_RECIPIENTS):
         if existing:
             hubspot_id = existing['id']
             db.set_hubspot_contact_id(person['id'], hubspot_id)
-            props = {'lifecyclestage': 'lead'}
+            props = {}
             if person.get('approached'):
                 props['hs_lead_status'] = 'ATTEMPTED_TO_CONTACT'
-            update_contact(hubspot_id, props)
+            if props:
+                update_contact(hubspot_id, props)
             updated += 1
             log.info("Linked existing: %s -> %s", name, hubspot_id)
             continue

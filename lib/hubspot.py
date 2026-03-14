@@ -528,7 +528,13 @@ def create_contact(firstname, lastname="", linkedin_url=None, properties=None):
         print(f"  Created contact: {firstname} {lastname} (ID: {result['id']})")
         return result["id"]
     except Exception as e:
-        print(f"  Error creating contact: {e}", file=sys.stderr)
+        detail = ""
+        if hasattr(e, "response") and e.response is not None:
+            try:
+                detail = f" — {e.response.json().get('message', e.response.text[:200])}"
+            except Exception:
+                detail = f" — {e.response.text[:200]}"
+        print(f"  Error creating contact: {e}{detail}", file=sys.stderr)
         return None
 
 
@@ -547,7 +553,13 @@ def update_contact(contact_id, properties):
         response.raise_for_status()
         return True
     except Exception as e:
-        print(f"  Error updating contact: {e}", file=sys.stderr)
+        detail = ""
+        if hasattr(e, "response") and e.response is not None:
+            try:
+                detail = f" — {e.response.json().get('message', e.response.text[:200])}"
+            except Exception:
+                detail = f" — {e.response.text[:200]}"
+        print(f"  Error updating contact {contact_id}: {e}{detail}", file=sys.stderr)
         return False
 
 
