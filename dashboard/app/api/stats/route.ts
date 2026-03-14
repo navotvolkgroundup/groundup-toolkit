@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
+import { getCached, setCache, CACHE_TTL } from "@/lib/cache"
 import { hubspotSearch } from "@/lib/hubspot"
 import { execSync } from "child_process"
 
@@ -35,6 +36,10 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
+    const cacheKey = "stats:dashboard"
+    const cached = getCached<Record<string, number>>(cacheKey)
+    if (cached) return NextResponse.json(cached)
+
     // Deals this week from HubSpot (VC Deal Flow pipeline only)
     const weekAgo = new Date()
     weekAgo.setDate(weekAgo.getDate() - 7)
@@ -89,14 +94,18 @@ export async function GET(req: NextRequest) {
       7
     )
 
-    return NextResponse.json({
+    const stats = {
       dealsThisWeek,
       dealsThisMonth,
       decksAnalyzed,
       meetingsRecorded,
       emailsProcessed,
       founderSignals,
-    })
+    }
+
+    setCache(cacheKey, stats, CACHE_TTL)
+
+    return NextResponse.json(stats)
   } catch (e) {
     console.error("Stats API error:", e)
     return NextResponse.json({

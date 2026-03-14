@@ -22,6 +22,16 @@
         "founder.*research",
         "due.*diligence.*founder"
       ]
+    },
+    {
+      "name": "deal-pass-automation",
+      "description": "Move a deal to Pass stage in HubSpot and send confirmation email",
+      "triggers": [
+        "pass.*deal",
+        "deal.*pass",
+        "close.*lost",
+        "reject.*deal"
+      ]
     }
   ]
 }

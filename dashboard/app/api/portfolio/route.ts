@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
+import { readFileSync } from "fs"
+import { join } from "path"
 
 const limiter = rateLimit({ interval: 60_000, limit: 30 })
 
@@ -20,76 +22,16 @@ const NOTES_CACHE_TTL = 15 * 60 * 1000
 
 type RawNote = { id: string; properties: { hs_note_body?: string; hs_timestamp?: string } }
 
-// Exact names from Google Sheet
-const FUND_I: { name: string; domain: string; fund: "I" }[] = [
-  { name: "402",                      domain: "",                    fund: "I" },
-  { name: "Accrue Savings",           domain: "accruemoney.com",     fund: "I" },
-  { name: "Array",                    domain: "",                    fund: "I" },
-  { name: "BigBrain",                 domain: "",                    fund: "I" },
-  { name: "BrightHire",               domain: "brighthire.ai",       fund: "I" },
-  { name: "BuildOps",                 domain: "buildops.com",        fund: "I" },
-  { name: "Daily.co",                 domain: "daily.co",            fund: "I" },
-  { name: "Dandelion Energy",         domain: "dandelionenergy.com", fund: "I" },
-  { name: "DemoLeap",                 domain: "",                    fund: "I" },
-  { name: "Disco",                    domain: "disconetwork.com",    fund: "I" },
-  { name: "Driift Holdings",          domain: "",                    fund: "I" },
-  { name: "EliseAI",                  domain: "eliseai.com",         fund: "I" },
-  { name: "Flyp",                     domain: "joinflyp.com",        fund: "I" },
-  { name: "Glass Imaging",            domain: "glass-imaging.com",   fund: "I" },
-  { name: "Good Mvmt",                domain: "",                    fund: "I" },
-  { name: "Jones",                    domain: "getjones.com",        fund: "I" },
-  { name: "Komodor",                  domain: "komodor.com",         fund: "I" },
-  { name: "Openlayer",                domain: "openlayer.com",       fund: "I" },
-  { name: "OptimalQ",                 domain: "optimalq.com",        fund: "I" },
-  { name: "Pipe",                     domain: "pipe.com",            fund: "I" },
-  { name: "Postmoda (fka Wardrobe)",  domain: "postmoda.com",        fund: "I" },
-  { name: "PrettyDamnQuick (PDQ)",    domain: "prettydamnquick.com", fund: "I" },
-  { name: "Tolstoy",                  domain: "gotolstoy.com",       fund: "I" },
-  { name: "TrueHold",                 domain: "truehold.com",        fund: "I" },
-  { name: "Tulu",                     domain: "tulu.io",             fund: "I" },
-  { name: "Upfort (fka Paladin)",     domain: "upfort.com",          fund: "I" },
-  { name: "Younity",                  domain: "younity.io",          fund: "I" },
-]
+// Load portfolio companies from the single-source-of-truth JSON file
+type PortfolioCompany = { name: string; domain: string; fund: "I" | "II" }
+const PORTFOLIO_JSON_PATH = join(process.cwd(), "..", "data", "portfolio-companies.json")
 
-const FUND_II: { name: string; domain: string; fund: "II" }[] = [
-  { name: "Axo Neurotech",       domain: "axoneurotech.com",       fund: "II" },
-  { name: "Baba",                domain: "callbaba.com",           fund: "II" },
-  { name: "Covenant",            domain: "covenant.co",            fund: "II" },
-  { name: "Dialogue",            domain: "nowdialogue.com",        fund: "II" },
-  { name: "Dialogica",           domain: "dialogicaai.com",        fund: "II" },
-  { name: "Draftboard",          domain: "draftboard.com",         fund: "II" },
-  { name: "FutureLot",           domain: "futurelot.com",          fund: "II" },
-  { name: "G2",                  domain: "g2-sys.com",             fund: "II" },
-  { name: "Harbinger",           domain: "harbingermotors.com",    fund: "II" },
-  { name: "Hello Wonder",        domain: "hellowonder.ai",         fund: "II" },
-  { name: "HyWatts",             domain: "hywatts.com",            fund: "II" },
-  { name: "Kela",                domain: "kelacyber.com",          fund: "II" },
-  { name: "Konko.AI",            domain: "konko.ai",               fund: "II" },
-  { name: "Lenkie",              domain: "lenkie.com",             fund: "II" },
-  { name: "Meridian",            domain: "meridianpay.com",        fund: "II" },
-  { name: "Nevona.AI",           domain: "nevona.ai",              fund: "II" },
-  { name: "Ownli",               domain: "ownli.co",               fund: "II" },
-  { name: "Panjaya",             domain: "panjaya.ai",             fund: "II" },
-  { name: "Pillar Security",     domain: "pillar.security",        fund: "II" },
-  { name: "Portless",            domain: "portless.com",           fund: "II" },
-  { name: "PreQl",               domain: "preql.com",              fund: "II" },
-  { name: "Proov.ai",            domain: "proov.ai",               fund: "II" },
-  { name: "Real",                domain: "real.dev",               fund: "II" },
-  { name: "Reap",                domain: "getreap.com",            fund: "II" },
-  { name: "Refine Intelligence", domain: "refineintelligence.com", fund: "II" },
-  { name: "Ritual",              domain: "ourritual.com",          fund: "II" },
-  { name: "StarCloud",           domain: "starcloud.com",          fund: "II" },
-  { name: "TermScout",           domain: "termscout.com",          fund: "II" },
-  { name: "ThreeFold",           domain: "threefold.ai",           fund: "II" },
-  { name: "TripleWhale",         domain: "triplewhale.com",        fund: "II" },
-  { name: "Unit.AI",             domain: "unitailabs.com",         fund: "II" },
-  { name: "Weave",               domain: "weave.bio",              fund: "II" },
-  { name: "Zealthy",             domain: "getzealthy.com",         fund: "II" },
-  { name: "Zeromark",            domain: "zeromark.com",           fund: "II" },
-  { name: "Phase Zero",           domain: "phasezero.ai",           fund: "II" },
-]
+function loadPortfolioCompanies(): PortfolioCompany[] {
+  const raw = readFileSync(PORTFOLIO_JSON_PATH, "utf-8")
+  return JSON.parse(raw) as PortfolioCompany[]
+}
 
-const ALL_COMPANIES = [...FUND_I, ...FUND_II]
+const ALL_COMPANIES = loadPortfolioCompanies()
 
 // Build lookup: normalized name → company definition
 const NAME_MAP = new Map(

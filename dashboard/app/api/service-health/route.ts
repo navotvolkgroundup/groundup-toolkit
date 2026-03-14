@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
+import { SERVICE_LOG_PATHS } from "@/lib/constants"
 import { execSync } from "child_process"
 import { statSync } from "fs"
 
@@ -18,37 +19,37 @@ interface ServiceHealth {
 
 const SERVICE_LOG_MAP: Record<string, { path: string; successPattern: RegExp; errorPattern: RegExp }> = {
   "founder-scout": {
-    path: "/var/log/founder-scout.log",
+    path: SERVICE_LOG_PATHS["founder-scout"],
     successPattern: /Scan complete|Email sent|WhatsApp sent/i,
     errorPattern: /Error|FAIL|Exception/i,
   },
   "email-to-deal": {
-    path: "/var/log/deal-automation.log",
+    path: SERVICE_LOG_PATHS["email-to-deal"],
     successPattern: /Created deal|Processed|Processing complete/i,
     errorPattern: /Error|FAIL|Exception/i,
   },
   "meeting-reminders": {
-    path: "/var/log/meeting-reminders.log",
+    path: SERVICE_LOG_PATHS["meeting-reminders"],
     successPattern: /Sent \d+ notification|Check complete|No upcoming/i,
     errorPattern: /Error|FAIL|Exception/i,
   },
   "meeting-bot": {
-    path: "/var/log/meeting-bot.log",
+    path: SERVICE_LOG_PATHS["meeting-bot"],
     successPattern: /Joined meeting|Summary sent|No meetings/i,
     errorPattern: /Error|FAIL|Exception/i,
   },
   "keep-on-radar": {
-    path: "/var/log/keep-on-radar.log",
+    path: SERVICE_LOG_PATHS["keep-on-radar"],
     successPattern: /deals reviewed|reply check complete/i,
     errorPattern: /Error|FAIL|Exception/i,
   },
   "whatsapp-watchdog": {
-    path: "/var/log/whatsapp-watchdog.log",
+    path: SERVICE_LOG_PATHS["whatsapp-watchdog"],
     successPattern: /OK|healthy|connected/i,
     errorPattern: /FAIL|RECOVERED|disconnected/i,
   },
   "health-check": {
-    path: "/var/log/openclaw-health.log",
+    path: SERVICE_LOG_PATHS["health-check"],
     successPattern: /Health check COMPLETE|All.*passed/i,
     errorPattern: /FAIL|not running|disconnected/i,
   },

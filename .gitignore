@@ -28,6 +28,7 @@ skills/content-writer/profiles/*/
 data/*
 !data/README.md
 !data/meeting-brief-optin.json
+!data/portfolio-companies.json
 *.db
 *.sqlite
 *.log

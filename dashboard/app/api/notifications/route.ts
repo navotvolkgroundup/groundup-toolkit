@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
+import { getCached, setCache, CACHE_TTL } from "@/lib/cache"
+import { SERVICE_LOG_PATHS } from "@/lib/constants"
 import { execSync } from "child_process"
 import { statSync } from "fs"
 import type { Notification, NotificationLevel } from "@/lib/types"
@@ -16,7 +18,7 @@ interface LogSource {
 
 const LOG_SOURCES: LogSource[] = [
   {
-    path: "/var/log/whatsapp-watchdog.log",
+    path: SERVICE_LOG_PATHS["whatsapp-watchdog"],
     serviceName: "WhatsApp Watchdog",
     serviceIcon: "Shield",
     includePatterns: [
@@ -28,7 +30,7 @@ const LOG_SOURCES: LogSource[] = [
     ],
   },
   {
-    path: "/var/log/openclaw-health.log",
+    path: SERVICE_LOG_PATHS["health-check"],
     serviceName: "System Health Check",
     serviceIcon: "HeartPulse",
     includePatterns: [
@@ -41,7 +43,7 @@ const LOG_SOURCES: LogSource[] = [
     ],
   },
   {
-    path: "/var/log/deal-automation.log",
+    path: SERVICE_LOG_PATHS["email-to-deal"],
     serviceName: "Email-to-Deal Logger",
     serviceIcon: "Inbox",
     includePatterns: [
@@ -54,7 +56,7 @@ const LOG_SOURCES: LogSource[] = [
     ],
   },
   {
-    path: "/var/log/founder-scout.log",
+    path: SERVICE_LOG_PATHS["founder-scout"],
     serviceName: "Founder Scout",
     serviceIcon: "Radar",
     includePatterns: [
@@ -67,7 +69,7 @@ const LOG_SOURCES: LogSource[] = [
     ],
   },
   {
-    path: "/var/log/keep-on-radar.log",
+    path: SERVICE_LOG_PATHS["keep-on-radar"],
     serviceName: "Keep on Radar",
     serviceIcon: "Eye",
     includePatterns: [
@@ -78,7 +80,7 @@ const LOG_SOURCES: LogSource[] = [
     ],
   },
   {
-    path: "/var/log/meeting-reminders.log",
+    path: SERVICE_LOG_PATHS["meeting-reminders"],
     serviceName: "Smart Meeting Briefs",
     serviceIcon: "CalendarClock",
     includePatterns: [
@@ -88,7 +90,7 @@ const LOG_SOURCES: LogSource[] = [
     ],
   },
   {
-    path: "/var/log/meeting-bot.log",
+    path: SERVICE_LOG_PATHS["meeting-bot"],
     serviceName: "Meeting Bot",
     serviceIcon: "Video",
     includePatterns: [
@@ -101,7 +103,7 @@ const LOG_SOURCES: LogSource[] = [
     ],
   },
   {
-    path: "/var/log/meeting-auto-join.log",
+    path: SERVICE_LOG_PATHS["meeting-auto-join"],
     serviceName: "Meeting Bot",
     serviceIcon: "Video",
     includePatterns: [
@@ -110,7 +112,7 @@ const LOG_SOURCES: LogSource[] = [
     ],
   },
   {
-    path: "/var/log/christina.log",
+    path: SERVICE_LOG_PATHS["christina"],
     serviceName: "Christina Processor",
     serviceIcon: "BrainCircuit",
     includePatterns: [
@@ -121,7 +123,7 @@ const LOG_SOURCES: LogSource[] = [
     ],
   },
   {
-    path: "/var/log/daily-maintenance.log",
+    path: SERVICE_LOG_PATHS["daily-maintenance"],
     serviceName: "Daily Maintenance",
     serviceIcon: "Settings",
     includePatterns: [
@@ -223,6 +225,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  const cacheKey = "notifications:parsed"
+  const cached = getCached<Notification[]>(cacheKey)
+  if (cached) {
+    return NextResponse.json({ notifications: cached, timestamp: new Date().toISOString() })
+  }
+
   const notifications: Notification[] = []
 
   for (const source of LOG_SOURCES) {
@@ -252,6 +260,8 @@ export async function GET(req: NextRequest) {
   // Sort by timestamp descending, take top 50
   notifications.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
   const result = notifications.slice(0, 50)
+
+  setCache(cacheKey, result, CACHE_TTL)
 
   return NextResponse.json({ notifications: result, timestamp: new Date().toISOString() })
 }

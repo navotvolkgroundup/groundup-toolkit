@@ -1,3 +1,5 @@
+import { getCached, setCache, CACHE_TTL } from "./cache"
+
 const MATON_BASE = "https://gateway.maton.ai/hubspot"
 const MATON_API_KEY = process.env.MATON_API_KEY || ""
 
@@ -6,29 +8,6 @@ interface HubSpotSearchResult {
   total: number
   paging?: { next?: { after: string } }
 }
-
-// In-memory cache with TTL for reducing redundant HubSpot API calls
-const cache = new Map<string, { data: unknown; expires: number }>()
-const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
-
-function getCached<T>(key: string): T | null {
-  const entry = cache.get(key)
-  if (entry && entry.expires > Date.now()) return entry.data as T
-  if (entry) cache.delete(key)
-  return null
-}
-
-function setCache(key: string, data: unknown, ttl = CACHE_TTL) {
-  cache.set(key, { data, expires: Date.now() + ttl })
-}
-
-// Cleanup stale entries every 10 minutes
-setInterval(() => {
-  const now = Date.now()
-  for (const [key, entry] of cache) {
-    if (entry.expires < now) cache.delete(key)
-  }
-}, 10 * 60 * 1000)
 
 export async function hubspotSearch(
   objectType: string,

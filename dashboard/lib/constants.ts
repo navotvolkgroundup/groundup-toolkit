@@ -41,3 +41,22 @@ export const CLOSED_STAGES = new Set([
   "1112320900",
   "1008223160",
 ])
+
+// ── Service log file paths ──────────────────────────────────────────
+// Single source of truth for log file locations, consumed by
+// service-health and notifications API routes.
+
+export const SERVICE_LOG_PATHS = {
+  "founder-scout": "/var/log/founder-scout.log",
+  "email-to-deal": "/var/log/deal-automation.log",
+  "meeting-reminders": "/var/log/meeting-reminders.log",
+  "meeting-bot": "/var/log/meeting-bot.log",
+  "meeting-auto-join": "/var/log/meeting-auto-join.log",
+  "keep-on-radar": "/var/log/keep-on-radar.log",
+  "whatsapp-watchdog": "/var/log/whatsapp-watchdog.log",
+  "health-check": "/var/log/openclaw-health.log",
+  "christina": "/var/log/christina.log",
+  "daily-maintenance": "/var/log/daily-maintenance.log",
+} as const
+
+export type ServiceLogId = keyof typeof SERVICE_LOG_PATHS

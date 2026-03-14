@@ -32,67 +32,31 @@ PORTFOLIO_STAGE_ID = "1008223160"  # Portfolio Monitoring
 PIPELINE_ID = "default"
 
 # ── Domain → Company mapping ──────────────────────────────────────────────────
+# Loaded from the single-source-of-truth JSON file, plus alias domains below.
 
-PORTFOLIO = {
-    "axoneurotech.com":      "Axo Neurotech",
-    "covenant.co":           "Covenant",
-    "nowdialogue.com":       "Dialogue",
-    "draftboard.com":        "Draftboard",
-    "futurelot.com":         "FutureLot",
-    "g2-sys.com":            "G2",
-    "harbingermotors.com":   "Harbinger",
-    "hellowonder.ai":        "Hello Wonder",
-    "w.hellowonder.ai":      "Hello Wonder",
-    "hywatts.com":           "HyWatts",
-    "kelacyber.com":         "Kela",
-    "lenkie.com":            "Lenkie",
-    "meridianpay.com":       "Meridian",
-    "ownli.co":              "Ownli",
-    "panjaya.ai":            "Panjaya",
-    "pillar.security":       "Pillar Security",
-    "portless.com":          "Portless",
-    "preql.com":             "PreQl",
-    "proov.ai":              "Proov.ai",
-    "real.dev":              "Real",
-    "getreap.com":           "Reap",
-    "refineintelligence.com":"Refine Intelligence",
-    "ourritual.com":         "Ritual",
-    "starcloud.com":         "StarCloud",
-    "termscout.com":         "TermScout",
-    "threefold.ai":          "ThreeFold",
-    "triplewhale.com":       "TripleWhale",
-    "unitailabs.com":        "Unit.AI",
-    "weave.bio":             "Weave",
-    "getzealthy.com":        "Zealthy",
-    "zeromark.com":          "Zeromark",
-    "phasezero.ai":          "Phase Zero",
-    "nevona.ai":             "Nevona.AI",
-    "callbaba.com":          "Baba",
-    "dialogicaai.com":       "Dialogica",
-    "konko.ai":              "Konko.AI",
-    # Fund I
-    "tulu.io":               "Tulu",
-    "getjones.com":          "Jones",
-    "optimalq.com":          "OptimalQ",
-    "pipe.com":              "Pipe",
-    "komodor.com":           "Komodor",
-    "joinflyp.com":          "Flyp",
-    "accruemoney.com":       "Accrue Savings",
-    "disconetwork.com":      "Disco",
-    "eliseai.com":           "EliseAI",
-    "truehold.com":          "TrueHold",
-    "younity.io":            "Younity",
-    "prettydamnquick.com":   "PrettyDamnQuick (PDQ)",
-    "dandelionenergy.com":   "Dandelion Energy",
-    "gotolstoy.com":         "Tolstoy",
-    "daily.co":              "Daily.co",
-    "brighthire.ai":         "BrightHire",
-    "buildops.com":          "BuildOps",
-    "openlayer.com":         "Openlayer",
-    "upfort.com":            "Upfort (fka Paladin)",
-    "glass-imaging.com":     "Glass Imaging",
-    "postmoda.com":          "Postmoda (fka Wardrobe)",
+_PORTFOLIO_JSON_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'portfolio-companies.json')
+
+def _load_portfolio_from_json() -> dict:
+    """Build domain→name dict from portfolio-companies.json."""
+    with open(_PORTFOLIO_JSON_PATH, 'r') as f:
+        companies = json.load(f)
+    mapping = {}
+    for co in companies:
+        domain = co.get("domain", "").strip()
+        name = co.get("name", "").strip()
+        if domain and name:
+            mapping[domain] = name
+    return mapping
+
+PORTFOLIO = _load_portfolio_from_json()
+
+# Alias domains not captured in the JSON (subdomains, alternate domains, etc.)
+_ALIAS_DOMAINS = {
+    "w.hellowonder.ai": "Hello Wonder",
 }
+for _alias_domain, _alias_name in _ALIAS_DOMAINS.items():
+    if _alias_domain not in PORTFOLIO:
+        PORTFOLIO[_alias_domain] = _alias_name
 
 PORTFOLIO_CACHE_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'portfolio-domains-cache.json')
 PORTFOLIO_CACHE_TTL = 86400  # 24 hours
