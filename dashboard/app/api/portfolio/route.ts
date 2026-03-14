@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
+import { hubspotPost, hubspotGet, hubspotBatchRead, hubspotGetAssociations } from "@/lib/hubspot"
 import { readFileSync } from "fs"
 import { join } from "path"
 
 const limiter = rateLimit({ interval: 60_000, limit: 30 })
-
-const MATON_API_KEY = process.env.MATON_API_KEY!
-const BASE = "https://gateway.maton.ai/hubspot"
-const HEADERS = {
-  Authorization: `Bearer ${MATON_API_KEY}`,
-  "Content-Type": "application/json",
-}
 
 const CACHE_TTL_MS = 15 * 60 * 1000
 let _cache: { data: unknown; ts: number } | null = null
@@ -37,34 +31,6 @@ const ALL_COMPANIES = loadPortfolioCompanies()
 const NAME_MAP = new Map(
   ALL_COMPANIES.map((c) => [c.name.toLowerCase(), c])
 )
-
-async function hsFetch(method: "GET" | "POST", path: string, body?: unknown, retries = 3): Promise<Record<string, unknown> | null> {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(`${BASE}${path}`, {
-        method,
-        headers: HEADERS,
-        body: body ? JSON.stringify(body) : undefined,
-        cache: "no-store",
-      })
-      if (res.status === 429) {
-        const wait = Math.pow(2, attempt) * 1000 // 1s, 2s, 4s
-        console.log(`[portfolio] 429 on ${path}, waiting ${wait}ms (attempt ${attempt + 1}/${retries})`)
-        await new Promise((r) => setTimeout(r, wait))
-        continue
-      }
-      if (!res.ok) { console.error(`hs${method} ${path} → ${res.status}`); return null }
-      return res.json()
-    } catch (e) {
-      console.error(`hs${method} ${path} error:`, e)
-      return null
-    }
-  }
-  return null
-}
-
-const hsPost = (path: string, body: unknown) => hsFetch("POST", path, body)
-const hsGet  = (path: string)               => hsFetch("GET",  path)
 
 function parseHealth(body: string): "GREEN" | "YELLOW" | "RED" | null {
   const m = body.match(/Health:\s*(GREEN|YELLOW|RED)/i)
@@ -105,14 +71,14 @@ function parseDateFromBody(body: string, ts: string | undefined): string | null 
 }
 
 async function fetchPortfolioData() {
-  console.log("[portfolio] fetchPortfolioData starting, key present:", !!MATON_API_KEY)
+  console.log("[portfolio] fetchPortfolioData starting")
   // ── Step 1: Search all portfolio update notes (with shared cache) ──────
   let notes: RawNote[] = []
   if (Date.now() - notesCache.ts < NOTES_CACHE_TTL && notesCache.notes.length > 0) {
     notes = notesCache.notes
     console.log(`[portfolio] notes from cache: ${notes.length}`)
   } else {
-    const noteSearch = await hsPost("/crm/v3/objects/notes/search", {
+    const noteSearch = await hubspotPost("/crm/v3/objects/notes/search", {
       filterGroups: [{ filters: [{ propertyName: "hs_note_body", operator: "CONTAINS_TOKEN", value: "PORTFOLIO UPDATE" }] }],
       properties: ["hs_note_body", "hs_timestamp"],
       limit: 100,
@@ -122,36 +88,38 @@ async function fetchPortfolioData() {
     console.log(`[portfolio] notes fetched: ${notes.length}`)
   }
 
-  // ── Step 2: For each note get its associated company ID (v3, serial) ───
-  type CompanyAssocV3 = { results?: { id: string; type: string }[] }
+  // ── Step 2: Batch-fetch note→company associations in parallel ──────────
   const noteToCompany = new Map<string, string>() // noteId → companyId
 
-  for (const note of notes) {
-    const assoc = await hsGet(
-      `/crm/v3/objects/notes/${note.id}/associations/companies`
-    ) as CompanyAssocV3 | null
-    const cid = assoc?.results?.[0]?.id
-    if (cid) noteToCompany.set(note.id, cid)
+  // Process in parallel batches of 10 to avoid rate limits
+  const ASSOC_BATCH_SIZE = 10
+  for (let i = 0; i < notes.length; i += ASSOC_BATCH_SIZE) {
+    const batch = notes.slice(i, i + ASSOC_BATCH_SIZE)
+    const results = await Promise.all(
+      batch.map((note) =>
+        hubspotGetAssociations("notes", note.id, "companies")
+          .then((assocResults) => ({
+            noteId: note.id,
+            companyId: assocResults[0]?.id ?? null,
+          }))
+      )
+    )
+    for (const { noteId, companyId } of results) {
+      if (companyId) noteToCompany.set(noteId, companyId)
+    }
   }
   console.log(`[portfolio] noteToCompany size: ${noteToCompany.size}`)
 
   // ── Step 3: Get company names for all associated company IDs ───────────
   const companyIds = [...new Set(noteToCompany.values())]
   console.log(`[portfolio] company IDs from notes: ${JSON.stringify(companyIds)}`)
-  type CompanyResult = { id: string; properties: { name?: string } }
   const companyMap = new Map<string, string>() // companyId → name
 
   if (companyIds.length > 0) {
     console.log(`[portfolio] batch reading ${companyIds.length} companies...`)
-    const chunks = []
-    for (let i = 0; i < companyIds.length; i += 100) chunks.push(companyIds.slice(i, i + 100))
-    for (const chunk of chunks) {
-      const data = await hsPost("/crm/v3/objects/companies/batch/read", {
-        inputs: chunk.map((id) => ({ id })),
-        properties: ["name"],
-      }) as { results?: CompanyResult[] } | null
-      console.log(`[portfolio] batch chunk returned ${data?.results?.length ?? 0} results`)
-      data?.results?.forEach((r) => companyMap.set(r.id, r.properties.name ?? ""))
+    const batchResults = await hubspotBatchRead("companies", companyIds, ["name"])
+    for (const r of batchResults) {
+      companyMap.set(r.id, r.properties.name ?? "")
     }
     console.log(`[portfolio] companyMap size: ${companyMap.size}`)
   }

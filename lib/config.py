@@ -236,6 +236,11 @@ class ToolkitConfig:
     def watchdog_cooldown(self):
         return self._data.get('notifications', {}).get('watchdog_cooldown_minutes', 60) * 60
 
+    # --- Founder Scout ---
+    @property
+    def founder_scout(self):
+        return self._data.get('founder_scout', {})
+
     # --- Meeting Bot ---
     @property
     def camofox_port(self):

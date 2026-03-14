@@ -17,6 +17,8 @@ Usage:
 import sys
 import requests
 from datetime import datetime
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
 from lib.config import config
 
@@ -31,6 +33,16 @@ _HEADERS = {
 # Reuse TCP connections across calls within the same process
 _session = requests.Session()
 _session.headers.update(_HEADERS)
+
+# Automatic retries for transient HTTP errors
+_retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[429, 500, 502, 503, 504],
+)
+_adapter = HTTPAdapter(max_retries=_retry_strategy)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
 
 # --- Association type IDs (HubSpot standard) ---
 ASSOC_DEAL_TO_COMPANY = 341
@@ -184,9 +196,8 @@ def update_deal_stage(deal_id, stage_id, close_date=None):
         properties["closedate"] = close_date
 
     try:
-        response = requests.patch(
+        response = _session.patch(
             _url(f"crm/v3/objects/deals/{deal_id}"),
-            headers=_HEADERS,
             json={"properties": properties},
             timeout=10,
         )
@@ -206,9 +217,8 @@ def update_deal_owner(deal_id, owner_id):
         True on success, False on failure.
     """
     try:
-        response = requests.patch(
+        response = _session.patch(
             _url(f"crm/v3/objects/deals/{deal_id}"),
-            headers=_HEADERS,
             json={"properties": {"hubspot_owner_id": str(owner_id)}},
             timeout=10,
         )
@@ -262,9 +272,8 @@ def associate_deal_company(deal_id, company_id):
         True on success, False on failure.
     """
     try:
-        response = requests.put(
+        response = _session.put(
             _url(f"crm/v4/objects/deals/{deal_id}/associations/companies/{company_id}"),
-            headers=_HEADERS,
             json=[{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": ASSOC_DEAL_TO_COMPANY}],
             timeout=10,
         )
@@ -530,9 +539,8 @@ def update_contact(contact_id, properties):
         True on success, False on failure.
     """
     try:
-        response = requests.patch(
+        response = _session.patch(
             _url(f"crm/v3/objects/contacts/{contact_id}"),
-            headers=_HEADERS,
             json={"properties": properties},
             timeout=10,
         )
@@ -550,9 +558,8 @@ def associate_contact_company(contact_id, company_id):
         True on success, False on failure.
     """
     try:
-        response = requests.put(
+        response = _session.put(
             _url(f"crm/v4/objects/contacts/{contact_id}/associations/companies/{company_id}"),
-            headers=_HEADERS,
             json=[{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": ASSOC_CONTACT_TO_COMPANY}],
             timeout=10,
         )

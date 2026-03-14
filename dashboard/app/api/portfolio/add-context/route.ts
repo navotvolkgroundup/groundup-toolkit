@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
+import { hubspotCreateObject, hubspotCreateAssociation } from "@/lib/hubspot"
 import { execSync } from "child_process"
 import { writeFileSync, readFileSync, unlinkSync } from "fs"
 
-const MATON_API_KEY = process.env.MATON_API_KEY
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
-const GATEWAY = "https://gateway.maton.ai/hubspot"
 
 export async function POST(request: Request) {
   const session = await auth()
@@ -105,19 +104,14 @@ Use N/A for metrics not found in the document.`
       `\u2500\u2500\u2500`, `Source: ${label}`, `Logged by Christina (AI) \u2014 ${label}`,
     ].join("\n")
 
-    const noteRes = await fetch(`${GATEWAY}/crm/v3/objects/notes`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${MATON_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ properties: { hs_note_body: noteBody, hs_timestamp: now.getTime().toString() } }),
+    const noteData = await hubspotCreateObject("notes", {
+      hs_note_body: noteBody,
+      hs_timestamp: now.getTime().toString(),
     })
-    const noteData = await noteRes.json()
-    const noteId = noteData.id
+    const noteId = noteData?.id
 
     if (companyId && noteId) {
-      await fetch(`${GATEWAY}/crm/v3/objects/notes/${noteId}/associations/companies/${companyId}/202`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${MATON_API_KEY}` },
-      })
+      await hubspotCreateAssociation("notes", noteId, "companies", companyId, "202")
     }
 
     return NextResponse.json({ success: true, noteId, health: metrics.health })

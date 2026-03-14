@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
+import { hubspotPost, hubspotCreateObject, hubspotCreateAssociation } from "@/lib/hubspot"
 
-const MATON_API_KEY = process.env.MATON_API_KEY
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
-const GATEWAY = "https://gateway.maton.ai/hubspot"
 
 export async function GET(request: Request) {
   const session = await auth()
@@ -14,16 +13,11 @@ export async function GET(request: Request) {
   if (!companyName) return NextResponse.json({ error: "Missing company param" }, { status: 400 })
 
   try {
-    const searchRes = await fetch(`${GATEWAY}/crm/v3/objects/notes/search`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${MATON_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filterGroups: [{ filters: [{ propertyName: "hs_note_body", operator: "CONTAINS_TOKEN", value: "SOI_DATA" }] }],
-        properties: ["hs_note_body", "hs_timestamp"], limit: 100,
-      }),
-    })
-    const searchData = await searchRes.json()
-    const results = searchData.results || []
+    const searchData = await hubspotPost("/crm/v3/objects/notes/search", {
+      filterGroups: [{ filters: [{ propertyName: "hs_note_body", operator: "CONTAINS_TOKEN", value: "SOI_DATA" }] }],
+      properties: ["hs_note_body", "hs_timestamp"], limit: 100,
+    }) as { results?: Array<{ id: string; properties: Record<string, string | null> }> } | null
+    const results = searchData?.results ?? []
 
     const investments: any[] = []
     for (const note of results) {
@@ -73,18 +67,13 @@ export async function POST(request: Request) {
 
     const noteBody = [`SOI_DATA: ${companyName}`, `Updated: ${new Date().toISOString()}`, `SOI_JSON:${JSON.stringify(parsedEntries)}`].join("\n")
 
-    const noteRes = await fetch(`${GATEWAY}/crm/v3/objects/notes`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${MATON_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ properties: { hs_note_body: noteBody, hs_timestamp: Date.now().toString() } }),
+    const noteData = await hubspotCreateObject("notes", {
+      hs_note_body: noteBody,
+      hs_timestamp: Date.now().toString(),
     })
-    const noteData = await noteRes.json()
 
-    if (companyId && noteData.id) {
-      await fetch(`${GATEWAY}/crm/v3/objects/notes/${noteData.id}/associations/companies/${companyId}/202`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${MATON_API_KEY}` },
-      })
+    if (companyId && noteData?.id) {
+      await hubspotCreateAssociation("notes", noteData.id, "companies", companyId, "202")
     }
 
     return NextResponse.json({ success: true, entries: parsedEntries })

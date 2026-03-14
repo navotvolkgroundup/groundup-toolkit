@@ -39,43 +39,26 @@ Phone-to-email mappings are loaded from `config.yaml`. See `config.example.yaml`
 
 **IMPORTANT:** The assistant has READ-ONLY access to team calendars. When creating events, create them on the assistant's calendar and invite the requesting user.
 
-**Syntax for creating events:**
+**Use the helper script** which handles Israel timezone (Asia/Jerusalem) automatically, including DST transitions:
 
 ```bash
-gws-auth calendar +insert \
-  --summary "Event Title" \
-  --start "YYYY-MM-DDTHH:MM:SS+02:00" \
-  --end "YYYY-MM-DDTHH:MM:SS+02:00" \
-  --attendee user@yourcompany.com
+~/.openclaw/skills/google-workspace/create-calendar-event <phone> <title_words...> <date> <time> [duration_minutes]
 ```
 
 **Example: Create "Pick up kids from school" event:**
 
 ```bash
-gws-auth calendar +insert \
-  --summary "Pick up kids from school" \
-  --start "2026-02-08T12:45:00+02:00" \
-  --end "2026-02-08T13:15:00+02:00" \
-  --attendee user@yourcompany.com \
-  --description "Reminder to pick up kids"
+~/.openclaw/skills/google-workspace/create-calendar-event +1234567890 Pick up kids from school 2026-02-08 12:45 30
 ```
 
-**Time Format Guidelines:**
-- Use RFC3339 format: `YYYY-MM-DDTHH:MM:SS+02:00`
-- Israel timezone: `+02:00` (or `+03:00` during DST)
-- For "today at 12:45", construct: `2026-02-08T12:45:00+02:00`
 - Default duration: 30 minutes if not specified
-
-**Optional Flags:**
-- `--description "text"` - Add event description
-- `--location "address"` - Add location
+- The script resolves the phone number to an email and adds them as attendee
+- Timezone offset is computed automatically from `Asia/Jerusalem` (handles IST/IDT)
 
 ### Important Notes:
 
-1. **Always add the requesting user as --attendee**
-2. **Use primary as the default calendar** (assistant's calendar)
-3. **Calculate proper timezone offset** (Israel is +02:00 or +03:00)
-4. **If time is ambiguous**, ask the user for clarification
+1. **Always use the create-calendar-event script** — do not manually construct timezone offsets
+2. **If time is ambiguous**, ask the user for clarification
 
 ## Gmail Operations
 

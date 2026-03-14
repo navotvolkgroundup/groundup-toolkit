@@ -150,7 +150,7 @@ DB_PATH = os.path.join(_DATA_DIR, 'founder-scout.db')
 LOCK_PATH = os.path.join(_DATA_DIR, 'founder-scout.lock')
 
 # Email recipients for scout reports (from config.yaml founder_scout.recipient_emails)
-_SCOUT_EMAILS = set(config._data.get('founder_scout', {}).get('recipient_emails', []))
+_SCOUT_EMAILS = set(config.founder_scout.get('recipient_emails', []))
 SCOUT_RECIPIENTS = []
 for m in config.team_members:
     if m['email'] in _SCOUT_EMAILS:
@@ -1488,7 +1488,8 @@ def _auto_detect_approached(db, people):
     all_deal_names = set()
     try:
         from lib.config import config
-        pipeline_config = config._data.get('hubspot', {}).get('pipelines', [{}])[0]
+        pipelines = config.hubspot_pipelines
+        pipeline_config = pipelines[0] if pipelines else {}
         stages = pipeline_config.get('stages', {})
         for stage_id in stages:
             deals = fetch_deals_by_stage(stage_id, properties=['dealname'])

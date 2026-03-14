@@ -1,6 +1,7 @@
 "use client"
 
 import { AppShell } from "@/components/layout/AppShell"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { Greeting } from "@/components/dashboard/Greeting"
 import { StatsBar } from "@/components/dashboard/StatsBar"
 import { PipelineFunnel } from "@/components/dashboard/PipelineFunnel"
@@ -29,45 +30,63 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <KeyboardShortcuts />
-      <Greeting />
-      <StatsBar />
-      <QuickActions />
+      <ErrorBoundary>
+        <Greeting />
+      </ErrorBoundary>
+      <ErrorBoundary>
+        <StatsBar />
+      </ErrorBoundary>
+      <ErrorBoundary>
+        <QuickActions />
+      </ErrorBoundary>
 
       {/* Pipeline */}
-      <PipelineFunnel />
+      <ErrorBoundary>
+        <PipelineFunnel />
+      </ErrorBoundary>
 
       {/* Analytics */}
       <SectionHeader>Analytics</SectionHeader>
-      <div className="grid gap-6 lg:grid-cols-2 mb-8">
-        <DealFlowChart />
-        <TeamHeatmap />
-      </div>
+      <ErrorBoundary>
+        <div className="grid gap-6 lg:grid-cols-2 mb-8">
+          <DealFlowChart />
+          <TeamHeatmap />
+        </div>
+      </ErrorBoundary>
 
       {/* Activity & Schedule */}
       <SectionHeader>Activity & Pipeline Health</SectionHeader>
-      <div className="grid gap-6 lg:grid-cols-2 mb-8">
-        <DealMovements />
-        <StaleDeals />
-      </div>
+      <ErrorBoundary>
+        <div className="grid gap-6 lg:grid-cols-2 mb-8">
+          <DealMovements />
+          <StaleDeals />
+        </div>
+      </ErrorBoundary>
 
       {/* Metrics */}
       <SectionHeader>Metrics</SectionHeader>
-      <div className="grid gap-6 lg:grid-cols-3 mb-8">
-        <DealSources />
-        <ResponseTime />
-        <SignalConversion />
-      </div>
+      <ErrorBoundary>
+        <div className="grid gap-6 lg:grid-cols-3 mb-8">
+          <DealSources />
+          <ResponseTime />
+          <SignalConversion />
+        </div>
+      </ErrorBoundary>
 
       {/* Signals & Leads */}
       <SectionHeader>Scouting</SectionHeader>
-      <div className="grid gap-6 lg:grid-cols-2 mb-8">
-        <SignalFeed />
-        <LeadsPanel />
-      </div>
+      <ErrorBoundary>
+        <div className="grid gap-6 lg:grid-cols-2 mb-8">
+          <SignalFeed />
+          <LeadsPanel />
+        </div>
+      </ErrorBoundary>
 
       {/* Services */}
       <SectionHeader>Services</SectionHeader>
-      <ServiceGrid />
+      <ErrorBoundary>
+        <ServiceGrid />
+      </ErrorBoundary>
     </AppShell>
   )
 }

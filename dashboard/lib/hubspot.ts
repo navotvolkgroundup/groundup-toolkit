@@ -3,10 +3,102 @@ import { getCached, setCache, CACHE_TTL } from "./cache"
 const MATON_BASE = "https://gateway.maton.ai/hubspot"
 const MATON_API_KEY = process.env.MATON_API_KEY || ""
 
+const AUTH_HEADERS = {
+  Authorization: `Bearer ${MATON_API_KEY}`,
+  "Content-Type": "application/json",
+}
+
 interface HubSpotSearchResult {
   results: Array<{ id: string; properties: Record<string, string | null> }>
   total: number
   paging?: { next?: { after: string } }
+}
+
+// ── Generic fetch with retry on 429 ─────────────────────────────────────────
+
+export async function hubspotFetch(
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+  path: string,
+  body?: unknown,
+  retries = 3
+): Promise<Record<string, unknown> | null> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`${MATON_BASE}${path}`, {
+        method,
+        headers: AUTH_HEADERS,
+        body: body ? JSON.stringify(body) : undefined,
+        cache: "no-store",
+      })
+      if (res.status === 429) {
+        const wait = Math.pow(2, attempt) * 1000
+        console.log(`[hubspot] 429 on ${path}, waiting ${wait}ms (attempt ${attempt + 1}/${retries})`)
+        await new Promise((r) => setTimeout(r, wait))
+        continue
+      }
+      if (!res.ok) {
+        console.error(`[hubspot] ${method} ${path} → ${res.status}`)
+        return null
+      }
+      return res.json()
+    } catch (e) {
+      console.error(`[hubspot] ${method} ${path} error:`, e)
+      return null
+    }
+  }
+  return null
+}
+
+export const hubspotGet = (path: string) => hubspotFetch("GET", path)
+export const hubspotPost = (path: string, body: unknown) => hubspotFetch("POST", path, body)
+export const hubspotPut = (path: string, body?: unknown) => hubspotFetch("PUT", path, body)
+
+// ── Typed helpers ────────────────────────────────────────────────────────────
+
+export async function hubspotBatchRead(
+  objectType: string,
+  ids: string[],
+  properties: string[]
+): Promise<Array<{ id: string; properties: Record<string, string | null> }>> {
+  const chunks: string[][] = []
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100))
+
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      hubspotPost(`/crm/v3/objects/${objectType}/batch/read`, {
+        inputs: chunk.map((id) => ({ id })),
+        properties,
+      }) as Promise<{ results?: Array<{ id: string; properties: Record<string, string | null> }> } | null>
+    )
+  )
+  return results.flatMap((r) => r?.results ?? [])
+}
+
+export async function hubspotCreateObject(
+  objectType: string,
+  properties: Record<string, string>
+): Promise<{ id: string; properties: Record<string, string | null> } | null> {
+  const res = await hubspotPost(`/crm/v3/objects/${objectType}`, { properties })
+  return res as { id: string; properties: Record<string, string | null> } | null
+}
+
+export async function hubspotGetAssociations(
+  fromType: string,
+  fromId: string,
+  toType: string
+): Promise<Array<{ id: string; type: string }>> {
+  const res = await hubspotGet(`/crm/v3/objects/${fromType}/${fromId}/associations/${toType}`)
+  return (res as { results?: Array<{ id: string; type: string }> } | null)?.results ?? []
+}
+
+export async function hubspotCreateAssociation(
+  fromType: string,
+  fromId: string,
+  toType: string,
+  toId: string,
+  associationType: string | number
+): Promise<void> {
+  await hubspotPut(`/crm/v3/objects/${fromType}/${fromId}/associations/${toType}/${toId}/${associationType}`)
 }
 
 export async function hubspotSearch(

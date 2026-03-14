@@ -136,7 +136,9 @@ def is_already_joined(event_id):
         return False
     try:
         joined_at = datetime.fromisoformat(entry["joined_at"])
-        return (datetime.now() - joined_at).total_seconds() < 12 * 3600
+        if joined_at.tzinfo is None:
+            joined_at = joined_at.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - joined_at).total_seconds() < 12 * 3600
     except Exception:
         return False
 
@@ -199,7 +201,7 @@ def join_meeting(meet_url, event, event_title):
 
             joined = load_joined()
             joined[event_id] = {
-                "joined_at": datetime.now().isoformat(),
+                "joined_at": datetime.now(timezone.utc).isoformat(),
                 "title": event_title,
                 "meet_url": meet_url,
                 "pid": proc.pid,
@@ -237,7 +239,7 @@ def check_ended_meetings():
         log(f"Meeting ended: {title} (PID {pid} no longer running)")
 
         entry['recording_checked'] = True
-        entry['ended_at'] = datetime.now().isoformat()
+        entry['ended_at'] = datetime.now(timezone.utc).isoformat()
         save_joined(joined)
 
         log(f"Meeting bot will process recording on next scheduled run")
