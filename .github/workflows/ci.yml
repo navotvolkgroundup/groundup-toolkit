@@ -61,7 +61,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: dashboard
-        run: npm ci
+        run: npm install
 
       - name: Type-check
         working-directory: dashboard
