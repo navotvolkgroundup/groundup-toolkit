@@ -18,7 +18,7 @@ ways, formation is likely underway.
 
 import re
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +350,7 @@ def detect_team_formation(conn, watchlist_people):
             left = m.get('left_date')
             if left:
                 try:
-                    dates.append(datetime.strptime(left, '%Y-%m-%d'))
+                    dates.append(datetime.strptime(left, '%Y-%m-%d').replace(tzinfo=timezone.utc))
                 except (ValueError, TypeError):
                     pass
 

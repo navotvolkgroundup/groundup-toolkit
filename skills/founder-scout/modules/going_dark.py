@@ -13,7 +13,7 @@ Combines with employment status for tiering:
 
 import re
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 # ---------------------------------------------------------------------------
@@ -329,8 +329,8 @@ def detect_going_dark(conn, person_id, current_employment_status=None):
     last_engagement = recent[0].get('last_engagement_date')
     if last_engagement:
         try:
-            eng_date = datetime.strptime(last_engagement, '%Y-%m-%d')
-            days_silent = (datetime.now() - eng_date).days
+            eng_date = datetime.strptime(last_engagement, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+            days_silent = (datetime.now(timezone.utc) - eng_date).days
             if days_silent > 30:
                 parts.append(f"no engagement in {days_silent} days")
         except (ValueError, TypeError):

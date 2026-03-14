@@ -25,7 +25,7 @@ Status classifications:
 import re
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -291,11 +291,11 @@ def calculate_retention_status(vest_end_typical):
         return STATUS_FAR
 
     try:
-        end_date = datetime.strptime(vest_end_typical, "%Y-%m-%d")
+        end_date = datetime.strptime(vest_end_typical, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
         return STATUS_FAR
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     months_remaining = (end_date - now).days / 30.44  # average days per month
 
     if months_remaining < 0:
