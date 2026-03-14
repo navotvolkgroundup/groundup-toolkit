@@ -1,208 +1,144 @@
-# GroundUp Toolkit v1.0
+# GroundUp Toolkit
 
-An open-source automation toolkit for venture capital teams, built on [OpenClaw](https://openclaw.ai). Automates deal flow, meeting management, founder research, CRM updates, and team communication through a customizable AI assistant connected via WhatsApp and a web dashboard.
+AI-powered automation platform for venture capital teams -- deal sourcing, meeting management, portfolio monitoring, and content creation via WhatsApp, email, and a web dashboard.
 
-Built and battle-tested by [GroundUp Ventures](https://groundup.vc). Ships with a default assistant persona ("Christina") that you can rename and customize to fit your firm.
+Built on [OpenClaw](https://openclaw.ai) and [Claude](https://anthropic.com). Battle-tested by [GroundUp Ventures](https://groundup.vc).
 
-## Skills
+## Architecture Overview
 
-| Skill | Trigger | Description |
-|-------|---------|-------------|
-| **Meeting Reminders** | Every 5 min (cron) | WhatsApp alerts 10 min before meetings with attendee context from HubSpot, LinkedIn, and Crunchbase |
-| **Meeting Bot** | Every 2–3 min (cron) | Auto-joins Google Meet calls, records audio, transcribes, extracts action items with Claude, emails summaries |
-| **Email-to-Deal Logger** | Every 2 hrs (cron) | Monitors Gmail for founder intros and deal emails, auto-creates HubSpot companies and deals with extracted context |
-| **Deck Analyzer** | WhatsApp command | Extracts structured data from pitch decks (DocSend, Google Drive, Dropbox) using Camofox browser |
-| **Deal Analyzer** | WhatsApp / standalone | Full investment memo — 12-section AI analysis, market sizing, team eval, competitive landscape |
-| **Founder Scout** | Daily + weekly (cron) | Scans LinkedIn for pre-founding signals (stealth updates, vesting cliffs, new company registrations) |
-| **Keep on Radar** | Monthly + replies (cron) | Reviews HubSpot watchlist deals, researches updates, sends digest emails, handles pass/keep/note actions |
-| **Content Writer** | WhatsApp command | Drafts LinkedIn posts, emails, and memos using customizable voice profiles |
-| **VC Automation** | WhatsApp command | Processes meeting notes into CRM updates, researches founders on LinkedIn and Crunchbase |
-| **Ping Teammate** | WhatsApp command | Calls a teammate's phone via Twilio when you need them urgently |
-| **Google Workspace** | WhatsApp command | Calendar queries, Gmail search, Google Docs operations via gws-auth CLI |
-| **LinkedIn Research** | WhatsApp command | Profile and company research using headless Chromium browser |
-| **Deal Logger** | WhatsApp command | Tracks deal discussions and notes from WhatsApp conversations |
+The system has four layers:
 
-## Dashboard
+- **OpenClaw Gateway** -- WhatsApp messaging gateway with 6 configurable agents. Receives commands from the team and dispatches them to skills.
+- **Skills (Python)** -- 13 automation modules for deal sourcing, meetings, portfolio tracking, and content. Run on cron schedules or triggered via WhatsApp.
+- **Dashboard (Next.js)** -- Web UI with pipeline views, signal feeds, portfolio monitoring, chat, and service controls. Authenticated via Google OAuth.
+- **Shared Libraries** -- Python and Node.js wrappers for Claude API, HubSpot (via Maton), Google Workspace, Brave Search, WhatsApp, and Twilio.
 
-A Next.js web dashboard for the team at `http://<server>:3000`:
-
-- Google OAuth login restricted to your team's email domain (configurable in `dashboard/lib/auth.ts`)
-- Real-time service status for all 13 skills
-- Chat interface with your AI assistant (name configurable in `config.yaml`)
-- Service help section with trigger info and commands
-- Dark/light theme
-
-## Systemd Services
-
-| Service | Port | Description |
-|---------|------|-------------|
-| `christina-dashboard` | 3000 | Next.js dashboard (production build) |
-| `linkedin-browser` | 18801 | Headless Chromium with LinkedIn session (CDP, localhost-only) |
-| `openclaw-gateway` | 18789 | WhatsApp gateway (OpenClaw) |
-
-## Cron Schedule
-
-| Schedule | Job | Log |
-|----------|-----|-----|
-| `*/3 * * *` | Meeting auto-join (detect & join Google Meet) | meeting-auto-join.log |
-| `*/5 * * *` | Meeting reminders (WhatsApp alerts) | meeting-reminders.log |
-| `*/5 * * *` | WhatsApp watchdog (connection health) | whatsapp-watchdog.log |
-| `*/15 * * *` | OpenClaw health check (gateway + system) | openclaw-health.log |
-| `0 */2 * * *` | Meeting bot (process recordings & notes) | meeting-bot.log |
-| `0 */2 * * *` | Christina processor (scheduling + deal logging) | christina.log |
-| `0 */2 * * *` | Keep on Radar — check email replies | keep-on-radar.log |
-| `30 8-22/2 * * 0-4` | Email-to-Deal pipeline (Sun–Thu, 8am–10pm) | deal-automation.log |
-| `30 8-18/2 * * 5` | Email-to-Deal pipeline (Fri, stops before Shabbat) | deal-automation.log |
-| `0 7 * * *` | Founder Scout — daily LinkedIn scan | founder-scout.log |
-| `0 8 * * 0` | Founder Scout — weekly briefing | founder-scout.log |
-| `0 14 * * 3,6` | Founder Scout — watchlist re-scan | founder-scout.log |
-| `0 10 15 * *` | Keep on Radar — monthly review | keep-on-radar.log |
-| `0 4 * * *` | Daily maintenance + OpenClaw auto-update | daily-maintenance.log |
-
-## Architecture
+External dependencies: Claude API (Anthropic), HubSpot CRM (via Maton), Google Workspace (OAuth2 via gws-auth), Brave Search, Twilio, and a headless Chromium session for LinkedIn.
 
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│   WhatsApp   │◄───►│   OpenClaw   │◄───►│   Skills &   │
-│  (Team Chat) │     │   Gateway    │     │   Scripts    │
-└──────────────┘     └──────────────┘     └──────┬───────┘
-                                                  │
-       ┌──────────────┐    ┌──────────────────────┤
-       │  Dashboard   │    │         │            │
-       │  (Next.js)   │    │         │            │
-       └──────────────┘    │         │            │
-                     ┌─────▼───┐ ┌───▼───┐ ┌─────▼──────┐
-                     │ Google  │ │HubSpot│ │  Claude AI  │
-                     │Workspace│ │  CRM  │ │ (Anthropic) │
-                     └─────────┘ └───────┘ └────────────┘
+WhatsApp <---> OpenClaw Gateway <---> Skills & Scripts
+                                          |
+              Dashboard (Next.js)         |
+                                    ------+------
+                                    |     |     |
+                                 Google HubSpot Claude
+                                Workspace  CRM    API
 ```
 
-## Standalone Exports
-
-The **Deal Analyzer** is available as a standalone Python package:
-
-```bash
-cd exports/deal-analyzer
-pip install -r requirements.txt
-export ANTHROPIC_API_KEY="sk-..."
-python example.py https://docsend.com/view/abc123
-```
-
-Generates a 12-section investment memo (markdown + HTML) with market sizing, team evaluation, competitive analysis, and a TL;DR.
-
-## Requirements
-
-- **Server**: Ubuntu 22.04+ (arm64 or amd64), 2GB RAM, 20GB disk
-- **Node.js**: 18+
-- **Python**: 3.10+
-- **OpenClaw**: v0.24+
-
-## Quick Start
-
-```bash
-# Clone and configure
-git clone https://github.com/navotvolkgroundup/groundup-toolkit.git
-cd groundup-toolkit
-cp config.example.yaml config.yaml
-cp .env.example .env
-# Edit both files with your API keys and team settings
-
-# Install
-sudo bash install.sh
-
-# Connect Google + WhatsApp
-gws-auth auth login
-openclaw channels login   # Scan QR code
-
-# Start gateway
-systemctl enable --now openclaw-gateway
-
-# Deploy dashboard
-cd dashboard && npm install && npm run build
-systemctl enable --now christina-dashboard
-
-# Install cron jobs
-crontab cron/crontab.example
-```
-
-## Configuration
-
-| File | Purpose |
-|------|---------|
-| `config.yaml` | Team members, assistant name, service settings, scheduling (Shabbat-aware) |
-| `.env` | API keys: Anthropic, Brave Search, Twilio, HubSpot (Maton) |
-| `dashboard/.env` | Dashboard: NEXTAUTH_SECRET, Google OAuth credentials |
-| `dashboard/lib/auth.ts` | Allowed email domain for login (change `@groundup.vc` to your domain) |
-
-Required integrations:
-
-| Service | Purpose |
-|---------|---------|
-| [OpenClaw](https://openclaw.ai) | WhatsApp gateway |
-| [Anthropic](https://console.anthropic.com) | Claude AI (analysis, memos, content) |
-| [Google Workspace](https://workspace.google.com) | Calendar, Gmail, Drive |
-| [Maton](https://maton.ai) | HubSpot API gateway |
-| [Twilio](https://twilio.com) | Phone call alerts |
-| [Brave Search](https://brave.com/search/api) | Web research |
-
-## Project Structure
+## Directory Structure
 
 ```
 groundup-toolkit/
-├── dashboard/                  # Next.js web dashboard
-│   ├── app/                    # Pages and API routes
-│   ├── components/             # React components (chat, services, layout)
-│   └── lib/                    # Auth, stores, types, utilities
-├── skills/                     # OpenClaw WhatsApp skills
-│   ├── meeting-reminders/      # Pre-meeting WhatsApp alerts
-│   ├── meeting-bot/            # Auto-join, record, transcribe meetings
-│   ├── deal-analyzer/          # Full investment memo generation
-│   ├── deck-analyzer/          # Pitch deck extraction (DocSend, etc.)
-│   ├── founder-scout/          # LinkedIn pre-founding signal scanner
-│   ├── keep-on-radar/          # Monthly watchlist review + digest
-│   ├── content-writer/         # AI-powered content drafting
-│   ├── vc-automation/          # Meeting notes → CRM, founder research
-│   ├── deal-logger/            # WhatsApp deal conversation tracking
-│   ├── ping-teammate/          # Twilio phone call pinger
-│   ├── google-workspace/       # Calendar, Gmail, Docs commands
-│   └── linkedin/               # Profile research via headless browser
-├── exports/                    # Standalone packages
-│   └── deal-analyzer/          # Pip-installable deal analysis library
-├── scripts/                    # Operational scripts
-│   ├── email-to-deal-automation.py
-│   ├── daily-maintenance.sh
-│   └── run-scheduled.sh        # Shabbat-aware scheduler
-├── services/                   # Systemd unit files
-│   └── linkedin-browser.service
-├── lib/                        # Shared libraries
-│   ├── config.py / config.js   # Config loaders
-│   ├── gws.py                  # Google Workspace operations
-│   ├── safe_url.py             # SSRF protection
-│   └── safe_log.py             # Sanitized error logging
-├── config.example.yaml
-├── .env.example
-└── install.sh
+  dashboard/          Next.js web dashboard (React 19, TypeScript, Tailwind, shadcn/ui)
+    app/              Pages (/, /portfolio, /settings, /login) and 22 API routes
+    components/       45 React components (widgets, chat, layout, services)
+    lib/              Auth, stores, types, utilities
+  skills/             13 OpenClaw skill directories (Python)
+  scripts/            Operational scripts (email-to-deal pipeline, health checks, maintenance)
+  lib/                Shared Python/JS libraries (config, hubspot, gws, claude, whatsapp, etc.)
+  services/           Systemd unit files
+  exports/            Standalone packages (deal-analyzer library)
+  data/               SQLite databases and state files (gitignored)
+  config.example.yaml Team members, assistant name, service settings
+  .env.example        API keys (Anthropic, Brave, Twilio, HubSpot/Maton)
+  install.sh          Server setup script
 ```
 
-## Security
+## Skills
 
-The toolkit includes security hardening (see `_security-audit/`):
-- API route auth + rate limiting
-- SSRF protection with domain allowlists and DNS pinning
-- Input validation on all endpoints
-- HTTP security headers
-- Dedicated unprivileged user for browser service
-- No shell injection (list-based subprocess everywhere)
-- Sanitized error logging (no credential leaks)
+### Deal Sourcing
+
+| Skill | Trigger | What it does |
+|-------|---------|--------------|
+| **Founder Scout** | Cron daily/weekly | Scans LinkedIn for pre-founding signals (stealth mode, vesting cliffs, new registrations) using 11 intelligence modules, pushes leads to HubSpot |
+| **Deal Analyzer** | WhatsApp / email | Generates 12-section investment memos from pitch decks with market sizing, team eval, and competitive analysis |
+| **Email-to-Deal** | Cron every 2h | Monitors Gmail for founder intros, auto-creates HubSpot companies and deals, asks sender when uncertain |
+| **Deck Analyzer** | Deprecated | Replaced by Deal Analyzer |
+
+### Meetings
+
+| Skill | Trigger | What it does |
+|-------|---------|--------------|
+| **Meeting Reminders** | Cron every 5 min | WhatsApp alerts 10 min before meetings with attendee context from HubSpot, LinkedIn, and Crunchbase |
+| **Meeting Bot** | Cron every 3 min | Auto-joins Google Meet, records, transcribes, extracts action items, emails summaries |
+| **Ping Teammate** | WhatsApp command | Calls a teammate's phone via Twilio |
+
+### Portfolio and Content
+
+| Skill | Trigger | What it does |
+|-------|---------|--------------|
+| **Keep on Radar** | Cron monthly + reply polling | Reviews HubSpot watchlist deals, researches updates, sends digest emails |
+| **Content Writer** | WhatsApp command | Drafts LinkedIn posts, emails, and memos using customizable voice profiles |
+
+### Utilities
+
+| Skill | Trigger | What it does |
+|-------|---------|--------------|
+| **VC Automation** | WhatsApp command | Processes meeting notes into CRM updates, founder research |
+| **Google Workspace** | WhatsApp command | Calendar queries, Gmail search, Google Docs operations |
+| **LinkedIn Research** | Internal | Profile and company research via headless Chromium browser |
+| **Deal Logger** | Placeholder | Not yet implemented |
+
+## Dashboard
+
+Next.js 16 app at `http://<server>:3000`. Google OAuth login restricted to your team's email domain.
+
+Key features:
+- Pipeline funnel, deal flow charts, team heatmap, signal feed
+- Portfolio monitoring with tear sheets and news
+- Chat interface with your AI assistant
+- Service status grid with toggle controls
+- 22 API routes pulling from HubSpot, SQLite, and log files
+
+Stack: React 19 + TypeScript + Tailwind + shadcn/ui + Zustand + TanStack Query + Recharts.
+
+## Setup
+
+**Requirements:** Ubuntu 22.04+ (arm64 or amd64), Python 3.10+, Node.js 18+, OpenClaw v0.24+.
+
+```bash
+git clone https://github.com/navotvolkgroundup/groundup-toolkit.git
+cd groundup-toolkit
+
+# Configure
+cp config.example.yaml config.yaml    # Team members, assistant name, settings
+cp .env.example .env                   # API keys
+cp dashboard/.env.example dashboard/.env  # Dashboard OAuth config
+
+# Python dependencies
+pip install -r requirements.txt
+
+# Dashboard
+cd dashboard && npm install && npm run build && cd ..
+
+# Connect services
+gws-auth auth login       # Google Workspace OAuth
+openclaw channels login   # WhatsApp QR code
+
+# Install
+sudo bash install.sh
+```
+
+Edit `dashboard/lib/auth.ts` to set your team's allowed email domain.
+
+See `config.example.yaml` and `.env.example` for all configuration options.
+
+## Deployment
+
+Runs on an Ubuntu server, deployed via SSH. Three systemd services:
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| `openclaw-gateway` | 18789 | WhatsApp gateway |
+| `christina-dashboard` | 3000 | Next.js dashboard |
+| `linkedin-browser` | 18801 | Headless Chromium with LinkedIn session |
+
+Cron jobs handle scheduled tasks (~26 jobs from every 3 minutes to monthly). See `cron/crontab.example` for the full schedule. The scheduler (`scripts/run-scheduled.sh`) is Shabbat-aware.
+
+## Standalone Export
+
+The Deal Analyzer is available as a standalone Python package in `exports/deal-analyzer/`.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-## Contributing
-
-Contributions welcome. This toolkit was built for VC workflows but the patterns (WhatsApp automation, meeting management, CRM integration) apply broadly. Open an issue or PR.
-
----
-
-Built with [OpenClaw](https://openclaw.ai) and [Claude](https://anthropic.com).
+MIT -- see [LICENSE](LICENSE).

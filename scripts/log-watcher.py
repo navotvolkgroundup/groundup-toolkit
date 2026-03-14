@@ -18,7 +18,32 @@ LOG_FILES = [
     'daily-maintenance.log', 'meeting-session-health.log',
 ]
 ERROR_RE = re.compile(
-    r'(ERROR|FAIL|Exception|Traceback|CRITICAL|could not|permission denied)', re.IGNORECASE)
+    r'('
+    # General error keywords
+    r'ERROR|FAIL|Exception|Traceback|CRITICAL|could not|permission denied'
+    # HubSpot API failures (lib/hubspot.py logs these)
+    r'|HubSpot.*(error|failed)|Error (creating|updating|fetching|associating) (deal|company|contact|owner)'
+    r'|Failed to update deal'
+    # Claude API failures (lib/claude.py logs these)
+    r'|Claude API.*(error|request error)|Rate limited|API overloaded|exhausted \d+ retries'
+    r'|Claude call failed'
+    # WhatsApp / OpenClaw failures (lib/whatsapp.py logs these)
+    r'|WhatsApp.*(failed|exception)|openclaw.*(error|failed|refused)'
+    # Meeting bot failures (camofox-join.js logs these)
+    r'|Could not find Join button|Join button wait failed|Screenshot failed'
+    r'|cookies.*(expired|invalid)|Session UNHEALTHY|Cookie re-injection failed'
+    r'|Twilio (error|call failed)|Invite failed'
+    # GWS / Gmail / email failures (lib/gws.py, lib/email.py log these)
+    r'|gws-auth (error|timeout|exception|JSON parse error)|Token exchange failed'
+    r'|Email failed for|Drive (download|upload|export) (failed|error)'
+    # File system issues
+    r'|No space left on device|ENOSPC|Disk quota exceeded'
+    # Python runtime errors
+    r'|ModuleNotFoundError|ImportError|MemoryError|ConnectionRefusedError'
+    r'|ConnectionError|TimeoutError|BrokenPipeError'
+    # Process / system failures
+    r'|killed|OOM|out of memory|Segmentation fault'
+    r')', re.IGNORECASE)
 STATE_FILE = Path(__file__).resolve().parent.parent / 'data' / 'log-watcher-seen.json'
 
 def load_state():

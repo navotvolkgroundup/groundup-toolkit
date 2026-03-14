@@ -26,6 +26,8 @@ import sqlite3
 import requests
 from datetime import datetime
 
+_session = requests.Session()
+
 # Load shared config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from lib.config import config
@@ -324,7 +326,7 @@ def create_google_doc(deck_data, section_results):
     ).encode('utf-8') + html_content.encode('utf-8') + f'\r\n--{boundary}--\r\n'.encode('utf-8')
 
     try:
-        resp = requests.post(
+        resp = _session.post(
             'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
             headers={
                 'Authorization': f'Bearer {access_token}',
@@ -341,7 +343,7 @@ def create_google_doc(deck_data, section_results):
         doc_id = resp.json()['id']
 
         # Share: anyone with link can view
-        requests.post(
+        _session.post(
             f'https://www.googleapis.com/drive/v3/files/{doc_id}/permissions',
             headers={
                 'Authorization': f'Bearer {access_token}',
@@ -1689,7 +1691,7 @@ def hubspot_create_company(name, domain=None, industry=None):
     if industry:
         properties["industry"] = industry
     try:
-        response = requests.post(
+        response = _session.post(
             f"{MATON_BASE_URL}/companies",
             headers=headers,
             json={"properties": properties},
@@ -1723,7 +1725,7 @@ def hubspot_create_deal(deal_name, pipeline="default", stage=None, company_id=No
         }]
 
     try:
-        response = requests.post(
+        response = _session.post(
             f"{MATON_BASE_URL}/deals",
             headers=headers,
             json=payload,
