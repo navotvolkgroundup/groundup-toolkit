@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""
+Meeting Bot Session Health Check
+Runs daily to verify Google session is alive.
+"""
+import os
+import sys
+import json
+import time
+from datetime import datetime
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from lib.config import config
+from lib.whatsapp import send_whatsapp
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+COOKIES_PATH = os.path.join(SCRIPT_DIR, "google-cookies.json")
+
+
+def log(msg):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] {msg}", flush=True)
+
+
+def check_session():
+    """Check if Google session cookies are valid."""
+    if not os.path.exists(COOKIES_PATH):
+        log("ERROR: No cookie file found")
+        return False
+
+    # Check cookie file age
+    cookie_age_days = (time.time() - os.path.getmtime(COOKIES_PATH)) / 86400
+    log(f"Cookie file age: {cookie_age_days:.1f} days")
+
+    if cookie_age_days > 10:
+        log(f"WARNING: Cookies are {cookie_age_days:.0f} days old - likely expired")
+        return False
+
+    # Validate cookies have expected domains
+    try:
+        with open(COOKIES_PATH) as f:
+            cookies = json.load(f)
+        google_cookies = [c for c in cookies if '.google.com' in c.get('domain', '')]
+        if len(google_cookies) < 5:
+            log(f"WARNING: Only {len(google_cookies)} Google cookies found - session may be invalid")
+            return False
+        log(f"Found {len(google_cookies)} Google cookies")
+    except Exception as e:
+        log(f"ERROR: Could not read cookies: {e}")
+        return False
+
+    return True
+
+
+def main():
+    log("Running session health check...")
+    healthy = check_session()
+
+    if healthy:
+        log("Session OK - cookies appear valid")
+    else:
+        log("Session UNHEALTHY - alerting team")
+        try:
+            send_whatsapp(config.alert_phone,
+                "Meeting bot session check failed - Google cookies may be expired. "
+                "Christina won't be able to join meetings until cookies are refreshed.")
+        except Exception as e:
+            log(f"Failed to send alert: {e}")
+
+    return 0 if healthy else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

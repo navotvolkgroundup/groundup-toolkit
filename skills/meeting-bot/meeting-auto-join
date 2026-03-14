@@ -86,7 +86,7 @@ def get_upcoming_meetings():
     time_max = now.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%dT%H:%M:%SZ')
     events = gws_calendar_events(calendar_id, time_min, time_max)
     window_start = now - timedelta(minutes=2)
-    window_end = now + timedelta(minutes=8)
+    window_end = now + timedelta(minutes=10)
 
     upcoming = []
     for event in events:
@@ -212,12 +212,44 @@ def join_meeting(meet_url, event, event_title):
         return False
 
 
+def check_ended_meetings():
+    """Check for meetings that ended and trigger recording processing."""
+    joined = load_joined()
+    if not joined:
+        return
+
+    for event_id, entry in list(joined.items()):
+        pid = entry.get('pid')
+        if not pid:
+            continue
+
+        # Check if process is still running
+        try:
+            os.kill(pid, 0)
+            continue  # Still running
+        except OSError:
+            pass  # Process ended
+
+        if entry.get('recording_checked'):
+            continue
+
+        title = entry.get('title', 'Unknown')
+        log(f"Meeting ended: {title} (PID {pid} no longer running)")
+
+        entry['recording_checked'] = True
+        entry['ended_at'] = datetime.now().isoformat()
+        save_joined(joined)
+
+        log(f"Meeting bot will process recording on next scheduled run")
+
+
 def main():
+    check_ended_meetings()
     log("Checking for upcoming meetings...")
 
     meetings = get_upcoming_meetings()
     if not meetings:
-        log("No meetings in the next 5 minutes")
+        log("No meetings in the next 10 minutes")
         return
 
     for event in meetings:

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.expanduser('~/.openclaw'))
 from lib.config import config
 from lib.gws import (gws_gmail_search, gws_gmail_thread_get, gws_gmail_modify, gws_gmail_send, gws_gmail_attachment_download)
 from lib.safe_url import is_safe_url, safe_request
-from scripts.portfolio_monitor import handle_portfolio_email
+from scripts.portfolio_monitor import handle_portfolio_email, PORTFOLIO
 
 ANTHROPIC_API_KEY = config.anthropic_api_key
 
@@ -61,7 +61,7 @@ def check_recent_emails():
     """Check for new emails via gws."""
     print(f'[{datetime.now()}] Checking for new emails...')
     team_emails = ' OR '.join([f'from:{email}' for email in TEAM_MEMBERS.keys()])
-    query = f'in:inbox -{PROCESSED_LABEL} ({team_emails}) newer_than:3h'
+    query = f'in:inbox -{PROCESSED_LABEL} ({team_emails}) newer_than:24h'
     return gws_gmail_search(query, max_results=100)
 
 
@@ -204,6 +204,35 @@ def _is_bad_company_name(name):
         if name_lower.startswith(prefix):
             return True
     return False
+
+
+def _classify_email_intent(subject, body):
+    """Use Claude to classify email intent: DEAL, PORTFOLIO, or UNCERTAIN."""
+    if not ANTHROPIC_API_KEY:
+        return 'DEAL'
+    try:
+        resp = requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={
+                'x-api-key': ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json'
+            },
+            json={
+                'model': 'claude-haiku-4-5-20251001',
+                'max_tokens': 10,
+                'messages': [{'role': 'user', 'content':
+                    f'Classify this VC team email as DEAL (new startup deal), PORTFOLIO (update about existing portfolio company), or UNCERTAIN. Reply with ONE word only.\n\nSubject: {subject}\nBody: {body[:500]}'}]
+            },
+            timeout=10
+        )
+        resp.raise_for_status()
+        result = resp.json()['content'][0]['text'].strip().upper()
+        if result in ('DEAL', 'PORTFOLIO', 'UNCERTAIN'):
+            return result
+    except Exception:
+        pass
+    return 'DEAL'
 
 
 def create_hubspot_company(company_data):
@@ -1516,6 +1545,39 @@ def process_email(thread):
         mark_email_processed(thread_id)
         return False
 
+    # Check if this company is actually a portfolio company
+    portfolio_companies = {v.lower(): v for v in PORTFOLIO.values()}
+    company_lower = company_data['name'].lower()
+    matched_portfolio = None
+    for pc_lower, pc_name in portfolio_companies.items():
+        if company_lower == pc_lower or company_lower in pc_lower or pc_lower in company_lower:
+            matched_portfolio = pc_name
+            break
+
+    if matched_portfolio:
+        print(f'  Detected portfolio company: {matched_portfolio}')
+        sender_phone = EMAIL_TO_PHONE.get(sender_email)
+        msg = f"I got your email about {matched_portfolio}. This looks like a portfolio company update, not a new deal. Should I log it as a portfolio touchpoint, or is this actually a new deal?"
+        if sender_phone:
+            send_whatsapp(sender_phone, msg)
+        send_email_simple(sender_email, f"Re: {subject}", msg + "\n\n- Christina")
+        print(f'  Asked sender about portfolio company: {matched_portfolio}')
+        mark_email_processed(thread_id)
+        return False
+
+    # When uncertain (no deck, no analysis), ask sender what to do
+    if not deck_links and not analysis:
+        intent = _classify_email_intent(subject, body)
+        if intent == 'UNCERTAIN':
+            sender_phone = EMAIL_TO_PHONE.get(sender_email)
+            msg = f"I got your email \"{subject}\" but I'm not sure what to do with it. Should I:\n1. Log as a new deal\n2. Log as a portfolio update\n3. Ignore it"
+            if sender_phone:
+                send_whatsapp(sender_phone, msg)
+            send_email_simple(sender_email, f"Re: {subject}", msg + "\n\n- Christina")
+            print(f'  Asked sender about uncertain email intent')
+            mark_email_processed(thread_id)
+            return False
+
     # Check for existing company to avoid duplicates
     existing_company_id = search_hubspot_company(company_data['name'])
     if existing_company_id:
@@ -1580,7 +1642,7 @@ def process_email(thread):
 def check_roastmydeck_emails():
     """Check for new RoastMyDeck analysis emails."""
     print(f"[{datetime.now()}] Checking RoastMyDeck emails...")
-    query = f"in:inbox -{PROCESSED_LABEL} subject:[RoastMyDeck] newer_than:3h"
+    query = f"in:inbox -{PROCESSED_LABEL} subject:[RoastMyDeck] newer_than:24h"
     return gws_gmail_search(query, max_results=100)
 
 
