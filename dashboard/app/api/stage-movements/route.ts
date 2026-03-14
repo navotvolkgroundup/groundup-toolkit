@@ -2,31 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { hubspotSearchAll } from "@/lib/hubspot"
+import { STAGE_LABELS, OWNER_NAMES, CLOSED_STAGES } from "@/lib/constants"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
-
-const STAGE_LABELS: Record<string, string> = {
-  qualifiedtobuy: "Sourcing",
-  appointmentscheduled: "Screening",
-  presentationscheduled: "First Meeting",
-  decisionmakerboughtin: "IC Review",
-  contractsent: "Due Diligence",
-  closedwon: "Term Sheet Offered",
-  "1112320899": "Term Sheet Signed",
-  "1112320900": "Investment Closed",
-  "1008223160": "Portfolio Monitoring",
-  "1138024523": "Keep on Radar",
-  closedlost: "Passed",
-}
-
-const OWNER_NAMES: Record<string, string> = {
-  "76836577": "Navot",
-  "7042119": "Jordan",
-  "80040886": "Cory",
-  "78681903": "David",
-  "80351816": "Allie",
-  "80033101": "Shira",
-}
 
 export async function GET(req: NextRequest) {
   const { ok } = limiter.check(req)
@@ -66,9 +44,8 @@ export async function GET(req: NextRequest) {
     )
 
     // Filter stale deals to active pipeline stages only (not passed/closed)
-    const closedStages = new Set(["closedlost", "1112320900", "1008223160"])
     const staleDeals = allActiveDeals
-      .filter((d) => !closedStages.has(d.properties.dealstage || ""))
+      .filter((d) => !CLOSED_STAGES.has(d.properties.dealstage || ""))
       .slice(0, 10)
       .map((d) => ({
         id: d.id,

@@ -14,7 +14,7 @@ import sqlite3
 import subprocess
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 import pytz
 import requests
@@ -82,7 +82,7 @@ class BriefDatabase:
                 updated_at TEXT NOT NULL
             )
         ''')
-        cutoff = (datetime.utcnow() - timedelta(hours=48)).isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
         conn.execute('DELETE FROM sent_briefs WHERE sent_at < ?', (cutoff,))
         conn.commit()
         conn.close()
@@ -100,7 +100,7 @@ class BriefDatabase:
         conn = sqlite3.connect(self.db_path)
         conn.execute(
             'INSERT OR REPLACE INTO sent_briefs (event_id, email, sent_at) VALUES (?, ?, ?)',
-            (event_id, email, datetime.utcnow().isoformat())
+            (event_id, email, datetime.now(timezone.utc).isoformat())
         )
         conn.commit()
         conn.close()
@@ -114,7 +114,7 @@ class BriefDatabase:
         conn.close()
         if row:
             updated = datetime.fromisoformat(row[1])
-            if datetime.utcnow() - updated < timedelta(days=max_age_days):
+            if datetime.now(timezone.utc) - updated < timedelta(days=max_age_days):
                 return json.loads(row[0])
         return None
 
@@ -122,7 +122,7 @@ class BriefDatabase:
         conn = sqlite3.connect(self.db_path)
         conn.execute(
             'INSERT OR REPLACE INTO founder_cache (email, data, updated_at) VALUES (?, ?, ?)',
-            (email.lower(), json.dumps(data), datetime.utcnow().isoformat())
+            (email.lower(), json.dumps(data), datetime.now(timezone.utc).isoformat())
         )
         conn.commit()
         conn.close()
@@ -374,7 +374,7 @@ def get_email_history(external_emails, max_threads=5):
 
 def get_previous_meetings(owner_email, external_domains, current_event_id):
     """Find past meetings with the same external domains (90d lookback)."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     start = now - timedelta(days=90)
 
     try:
@@ -654,10 +654,10 @@ def synthesize_brief(founder_data, hubspot_ctx, email_history,
 
 def process_founder_briefs():
     """Main loop: check calendars, generate briefs, send via WhatsApp."""
-    print(f"[{datetime.utcnow().isoformat()}] Starting founder brief check...")
+    print(f"[{datetime.now(timezone.utc).isoformat()}] Starting founder brief check...")
 
     db = BriefDatabase(BRIEF_DB_PATH)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     window_start = now + timedelta(minutes=BRIEF_WINDOW_END)
     window_end = now + timedelta(minutes=BRIEF_WINDOW_START)

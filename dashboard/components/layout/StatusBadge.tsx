@@ -7,6 +7,7 @@ const statusConfig: Record<ServiceStatus, { color: string; label: string }> = {
   active: { color: "bg-green-500", label: "Active" },
   inactive: { color: "bg-gray-500", label: "Inactive" },
   degraded: { color: "bg-amber-500", label: "Degraded" },
+  disabled: { color: "bg-zinc-400", label: "Disabled" },
 }
 
 export function StatusBadge({

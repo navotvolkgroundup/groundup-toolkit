@@ -14,7 +14,7 @@ import json
 import sys
 import os
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 GITHUB_API_BASE = "https://api.github.com"
 
@@ -295,7 +295,7 @@ def analyze_activity_baseline(events, previous_event_count=None):
 
     Returns: {is_spike: bool, current_rate: float, baseline_rate: float, multiplier: float}
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Count events in the last 7 days
     recent_count = 0
@@ -359,7 +359,7 @@ def check_npm_publications(username, token=None):
         return []
 
     results = []
-    cutoff = datetime.utcnow() - timedelta(days=90)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
 
     for obj in resp.json().get('objects', []):
         pkg = obj.get('package', {})
@@ -410,9 +410,9 @@ def enhanced_github_scan(username, person_name, last_scanned=None, token=None):
         try:
             cutoff = datetime.strptime(last_scanned, '%Y-%m-%dT%H:%M:%SZ')
         except (ValueError, TypeError):
-            cutoff = datetime.utcnow() - timedelta(days=7)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=7)
     else:
-        cutoff = datetime.utcnow() - timedelta(days=7)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
     # --- Fetch events for baseline analysis ---
     events_resp = _gh_get(

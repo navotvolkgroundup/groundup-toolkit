@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
-import { hubspotSearchAll } from "@/lib/hubspot"
+import { hubspotSearchAllCached } from "@/lib/hubspot"
+import { OWNER_NAMES } from "@/lib/constants"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
-
-// HubSpot owner IDs → display names
-const TEAM_MEMBERS: Record<string, string> = {
-  "76836577": "Navot",
-  "7042119": "Jordan",
-  "80040886": "Cory",
-  "78681903": "David",
-  "80351816": "Allie",
-}
 
 export async function GET(req: NextRequest) {
   const { ok } = limiter.check(req)
@@ -26,7 +18,7 @@ export async function GET(req: NextRequest) {
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - weeksBack * 7)
 
-    const deals = await hubspotSearchAll(
+    const deals = await hubspotSearchAllCached(
       "deals",
       [{ propertyName: "createdate", operator: "GTE", value: cutoff.getTime().toString() }],
       ["dealname", "createdate", "hubspot_owner_id", "groundup_source"],
@@ -52,7 +44,7 @@ export async function GET(req: NextRequest) {
     // Group deals by team member (owner ID) and week
     const heatmap: Array<{ member: string; weeks: number[] }> = []
 
-    for (const [ownerId, memberName] of Object.entries(TEAM_MEMBERS)) {
+    for (const [ownerId, memberName] of Object.entries(OWNER_NAMES)) {
       const weekCounts = new Array(weeksBack).fill(0)
 
       for (const deal of deals) {

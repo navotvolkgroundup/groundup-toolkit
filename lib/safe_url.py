@@ -2,7 +2,7 @@
 Centralized SSRF protection for URL fetching.
 
 Provides domain allowlist validation with DNS rebinding protection
-and multi-hop redirect following. Used by deal-analyzer, deck-analyzer,
+and multi-hop redirect following. Used by deal-analyzer,
 and email-to-deal-automation.
 """
 import ipaddress

@@ -28,6 +28,10 @@ _HEADERS = {
     "Content-Type": "application/json"
 }
 
+# Reuse TCP connections across calls within the same process
+_session = requests.Session()
+_session.headers.update(_HEADERS)
+
 # --- Association type IDs (HubSpot standard) ---
 ASSOC_DEAL_TO_COMPANY = 341
 ASSOC_NOTE_TO_COMPANY = 190
@@ -62,7 +66,7 @@ def search_company(name=None, domain=None):
         return None
 
     try:
-        response = requests.post(
+        response = _session.post(
             _url("crm/v3/objects/companies/search"),
             headers=_HEADERS,
             json={
@@ -100,7 +104,7 @@ def create_company(name, description=""):
         return None
 
     try:
-        response = requests.post(
+        response = _session.post(
             _url("crm/v3/objects/companies"),
             headers=_HEADERS,
             json={"properties": {"name": name, "description": description}},
@@ -145,7 +149,7 @@ def create_deal(deal_name, company_id=None, owner_id=None, pipeline_id=None, sta
         properties["hubspot_owner_id"] = str(owner_id)
 
     try:
-        response = requests.post(
+        response = _session.post(
             _url("crm/v3/objects/deals"),
             headers=_HEADERS,
             json={"properties": properties},
@@ -231,7 +235,7 @@ def fetch_deals_by_stage(stage_id, properties=None):
     properties = properties or ["dealname", "hubspot_owner_id", "description", "createdate", "hs_lastmodifieddate"]
 
     try:
-        response = requests.post(
+        response = _session.post(
             _url("crm/v3/objects/deals/search"),
             headers=_HEADERS,
             json={
@@ -278,7 +282,7 @@ def get_company_for_deal(deal_id):
         Company dict with properties, or None.
     """
     try:
-        response = requests.get(
+        response = _session.get(
             _url(f"crm/v4/objects/deals/{deal_id}/associations/companies"),
             headers=_HEADERS,
             timeout=10,
@@ -291,7 +295,7 @@ def get_company_for_deal(deal_id):
             return None
 
         company_id = results[0]["toObjectId"]
-        response = requests.get(
+        response = _session.get(
             _url(f"crm/v3/objects/companies/{company_id}"),
             headers=_HEADERS,
             params={"properties": "name,domain,description"},
@@ -318,7 +322,7 @@ def get_deals_for_company(company_id, limit=3):
         return []
 
     try:
-        response = requests.get(
+        response = _session.get(
             _url(f"crm/v3/objects/companies/{company_id}/associations/deals"),
             headers=_HEADERS,
             timeout=10,
@@ -332,7 +336,7 @@ def get_deals_for_company(company_id, limit=3):
 
         deals = []
         for did in deal_ids[:limit]:
-            resp = requests.get(
+            resp = _session.get(
                 _url(f"crm/v3/objects/deals/{did}"),
                 headers=_HEADERS,
                 params={"properties": "dealname,dealstage,amount,closedate"},
@@ -362,7 +366,7 @@ def add_note(object_id, note_text, object_type="deals"):
     assoc_type = ASSOC_NOTE_TO_DEAL if object_type == "deals" else ASSOC_NOTE_TO_COMPANY
 
     try:
-        response = requests.post(
+        response = _session.post(
             _url("crm/v3/objects/notes"),
             headers=_HEADERS,
             json={
@@ -393,7 +397,7 @@ def get_latest_note(company_id):
         return None
 
     try:
-        response = requests.get(
+        response = _session.get(
             _url(f"crm/v3/objects/companies/{company_id}/associations/notes"),
             headers=_HEADERS,
             params={"limit": 1},
@@ -407,7 +411,7 @@ def get_latest_note(company_id):
             return None
 
         note_id = results[0]["id"]
-        resp = requests.get(
+        resp = _session.get(
             _url(f"crm/v3/objects/notes/{note_id}"),
             headers=_HEADERS,
             params={"properties": "hs_note_body"},
@@ -449,7 +453,7 @@ def search_contact(email=None, linkedin_url=None, name=None):
         return None
 
     try:
-        response = requests.post(
+        response = _session.post(
             _url("crm/v3/objects/contacts/search"),
             headers=_HEADERS,
             json={
@@ -504,7 +508,7 @@ def create_contact(firstname, lastname="", linkedin_url=None, properties=None):
         props.update(properties)
 
     try:
-        response = requests.post(
+        response = _session.post(
             _url("crm/v3/objects/contacts"),
             headers=_HEADERS,
             json={"properties": props},

@@ -2,9 +2,46 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { defaultServices } from "@/lib/data/services"
+import * as fs from "fs"
+import * as path from "path"
 
 // Security: rate limit services API to 60 requests per minute per IP
 const limiter = rateLimit({ interval: 60_000, limit: 60 })
+
+// Persist service toggle state to JSON file
+const STATE_DIR = path.join(process.cwd(), "data")
+const STATE_FILE = path.join(STATE_DIR, "service-toggles.json")
+
+type ToggleState = Record<string, boolean>
+
+function loadToggleState(): ToggleState {
+  try {
+    if (fs.existsSync(STATE_FILE)) {
+      return JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"))
+    }
+  } catch {
+    // Fall back to defaults on parse error
+  }
+  return {}
+}
+
+function saveToggleState(state: ToggleState) {
+  try {
+    if (!fs.existsSync(STATE_DIR)) fs.mkdirSync(STATE_DIR, { recursive: true })
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
+  } catch (e) {
+    console.error("Failed to save service toggle state:", e)
+  }
+}
+
+// Apply persisted state to defaultServices on startup
+const toggleState = loadToggleState()
+for (const service of defaultServices) {
+  if (service.canToggle && service.id in toggleState) {
+    service.enabledForUser = toggleState[service.id]
+    service.status = toggleState[service.id] ? "active" : "inactive"
+  }
+}
 
 export async function GET(req: NextRequest) {
   // Security: rate limiting
@@ -58,6 +95,11 @@ export async function PATCH(req: NextRequest) {
 
   service.enabledForUser = enabled
   service.status = enabled ? "active" : "inactive"
+
+  // Persist toggle state
+  const state = loadToggleState()
+  state[serviceId] = enabled
+  saveToggleState(state)
 
   return NextResponse.json(service)
 }

@@ -1,0 +1,15 @@
+# GroundUp Toolkit Python dependencies — pinned for reproducibility
+# Install: pip install -r requirements.txt
+
+# Core
+requests==2.32.5
+PyYAML==6.0.3
+pytz==2025.2
+
+# AI
+anthropic==2025.2
+
+# PDF processing (used by deal-analyzer export module)
+pdfplumber==0.11.8
+
+# Built-in (no install needed): sqlite3, json, re, subprocess, fcntl, hashlib

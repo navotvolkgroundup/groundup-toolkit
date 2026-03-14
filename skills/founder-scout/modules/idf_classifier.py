@@ -8,7 +8,7 @@ receives profile text and sqlite3 connections from the caller (scout.py).
 
 import re
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +490,7 @@ def save_idf_profile(conn, person_id, classification):
         person_id: FK to tracked_people.id.
         classification: dict as returned by classify_idf_unit.
     """
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     signals_json = json.dumps(classification.get("signals", []), ensure_ascii=False)
     cur = conn.cursor()
 

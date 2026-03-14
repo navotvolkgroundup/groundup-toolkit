@@ -9,7 +9,7 @@ Each dimension scores 0-100; a weighted composite maps to a classification
 
 import json
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 # --- Weights ---
@@ -401,7 +401,7 @@ def save_score(conn, person_id, score_data):
             score_data['composite_score'],
             score_data['classification'],
             json.dumps(score_data['breakdown']),
-            datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+            datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         ),
     )
     conn.commit()
@@ -440,7 +440,7 @@ def get_score_changes(conn, days=7):
     Returns list of dicts with person_id, name, old_classification, new_classification,
     old_composite, new_composite.
     """
-    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     # Get latest two scores per person where the most recent is within the window
     rows = conn.execute('''

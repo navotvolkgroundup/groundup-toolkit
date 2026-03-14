@@ -1,4 +1,4 @@
-export type ServiceStatus = "active" | "inactive" | "degraded"
+export type ServiceStatus = "active" | "inactive" | "degraded" | "disabled"
 
 export type ServiceCategory =
   | "Deal Sourcing"

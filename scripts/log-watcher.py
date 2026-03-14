@@ -3,7 +3,7 @@
 Usage: log-watcher.py scan|alert|digest
 """
 import os, sys, re, json, hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.expanduser('~/.openclaw'))
@@ -28,7 +28,7 @@ def load_state():
         data = json.loads(STATE_FILE.read_text())
     except (json.JSONDecodeError, OSError):
         return {}
-    cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     return {k: v for k, v in data.items() if v > cutoff}
 
 def save_state(state):
@@ -48,14 +48,14 @@ def _parse_ts(line):
     return None
 
 def scan_logs(hours):
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     errors = []
     for name in LOG_FILES:
         path = os.path.join(LOG_DIR, name)
         if not os.path.isfile(path):
             continue
         try:
-            if datetime.utcfromtimestamp(os.path.getmtime(path)) < cutoff:
+            if datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc) < cutoff:
                 continue
         except OSError:
             continue
@@ -107,7 +107,7 @@ def _send(phone, msg):
 def cmd_alert():
     phone = _require_phone()
     errors = scan_logs(2)
-    state, now = load_state(), datetime.utcnow().isoformat()
+    state, now = load_state(), datetime.now(timezone.utc).isoformat()
     new_errors = []
     for name, line in errors:
         h = error_hash(name, line)

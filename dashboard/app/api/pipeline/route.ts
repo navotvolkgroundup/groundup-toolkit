@@ -1,24 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
-import { hubspotSearchAll } from "@/lib/hubspot"
+import { hubspotSearchAllCached } from "@/lib/hubspot"
+import { PIPELINE_STAGES } from "@/lib/constants"
 
 const limiter = rateLimit({ interval: 60_000, limit: 30 })
-
-// VC Deal Flow pipeline stages (HubSpot stage IDs → labels)
-const PIPELINE_STAGES = [
-  { id: "qualifiedtobuy", label: "Sourcing", order: 0 },
-  { id: "appointmentscheduled", label: "Screening", order: 1 },
-  { id: "presentationscheduled", label: "First Meeting", order: 2 },
-  { id: "decisionmakerboughtin", label: "IC Review", order: 3 },
-  { id: "contractsent", label: "Due Diligence", order: 4 },
-  { id: "closedwon", label: "Term Sheet Offered", order: 5 },
-  { id: "1112320899", label: "Term Sheet Signed", order: 6 },
-  { id: "1112320900", label: "Investment Closed", order: 7 },
-  { id: "1008223160", label: "Portfolio Monitoring", order: 8 },
-  { id: "1138024523", label: "Keep on Radar", order: 9 },
-  { id: "closedlost", label: "Passed", order: 10 },
-]
 
 export async function GET(req: NextRequest) {
   const { ok } = limiter.check(req)
@@ -28,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   try {
-    const allDeals = await hubspotSearchAll(
+    const allDeals = await hubspotSearchAllCached(
       "deals",
       [{ propertyName: "pipeline", operator: "EQ", value: "default" }],
       ["dealname", "dealstage", "amount", "hubspot_owner_id", "createdate", "closedate"],

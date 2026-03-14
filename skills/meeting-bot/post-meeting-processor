@@ -184,6 +184,15 @@ def process_meeting(event_id, entry):
     log(f"Done: {title}")
 
 def main():
+    # Prevent overlapping cron runs
+    lock_path = os.path.join(_DATA, 'post-meeting-processor.lock')
+    lock_fd = open(lock_path, 'w')
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log("Another instance running, exiting.")
+        return
+
     log("Post-meeting processor starting")
     candidates = find_ended_meetings()
     if not candidates:

@@ -73,7 +73,18 @@ apt-get autoremove -y -qq 2>&1 || true
 
 # Reboot if needed
 if [ -f /var/run/reboot-required ]; then
-    log "Reboot required — rebooting now..."
+    log "Reboot required — alerting team and scheduling reboot..."
+    # Load .env for WhatsApp alert
+    ENV_FILE="${HOME}/.env"
+    ALERT_PHONE=""
+    if [ -f "$ENV_FILE" ]; then
+        ALERT_PHONE=$(grep '^ALERT_PHONE=' "$ENV_FILE" | head -1 | cut -d= -f2 | tr -d '"' | tr -d "'")
+    fi
+    if [ -n "$ALERT_PHONE" ]; then
+        openclaw message send --channel whatsapp --target "$ALERT_PHONE" \
+            --message "Server rebooting in 2 minutes for package upgrades. Services will be back shortly." 2>/dev/null || true
+    fi
+    sleep 60
     shutdown -r +1 "Daily maintenance: auto-reboot after package upgrade"
 else
     log "No reboot needed."
