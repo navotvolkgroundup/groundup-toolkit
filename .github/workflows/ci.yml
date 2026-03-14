@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-checks:
+    name: Python checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile-check main Python files
+        run: |
+          python3 -m py_compile lib/__init__.py
+          python3 -m py_compile lib/brave.py
+          python3 -m py_compile lib/claude.py
+          python3 -m py_compile lib/config.py
+          python3 -m py_compile lib/email.py
+          python3 -m py_compile lib/gws.py
+          python3 -m py_compile lib/hubspot.py
+          python3 -m py_compile lib/safe_log.py
+          python3 -m py_compile lib/safe_url.py
+          python3 -m py_compile lib/whatsapp.py
+          python3 -m py_compile scripts/email-to-deal-automation.py
+          python3 -m py_compile scripts/generate_tearsheet.py
+          python3 -m py_compile scripts/log-watcher.py
+          python3 -m py_compile scripts/meeting-brief-optin-handler.py
+          python3 -m py_compile scripts/portfolio_monitor.py
+          python3 -m py_compile skills/founder-scout/scout.py
+          python3 -m py_compile skills/deal-analyzer/analyzer.py
+          python3 -m py_compile skills/content-writer/writer.py
+          python3 -m py_compile skills/keep-on-radar/radar.py
+          python3 -m py_compile skills/meeting-reminders/attendee_enricher.py
+          python3 -m py_compile skills/meeting-reminders/calendar_checker.py
+          python3 -m py_compile skills/meeting-reminders/founder_brief.py
+          python3 -m py_compile skills/meeting-reminders/reminders.py
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -v
+
+  typescript-checks:
+    name: TypeScript checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Type-check
+        working-directory: dashboard
+        run: npx tsc --noEmit
+
+  lint:
+    name: Lint (syntax check all Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Syntax-check all Python files
+        run: |
+          exit_code=0
+          for f in $(find scripts/ lib/ skills/ -name '*.py' -type f); do
+            python3 -m py_compile "$f" || exit_code=1
+          done
+          exit $exit_code
+
+# ---------------------------------------------------------------------------
+# Deployment
+# ---------------------------------------------------------------------------
+# To add automatic deployment, create a new job like:
+#
+#   deploy:
+#     name: Deploy to server
+#     runs-on: ubuntu-latest
+#     needs: [python-checks, typescript-checks, lint]
+#     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+#     steps:
+#       - uses: actions/checkout@v4
+#
+#       - name: Deploy via SSH
+#         uses: appleboy/ssh-action@v1
+#         with:
+#           host: ${{ secrets.SERVER_HOST }}
+#           username: ${{ secrets.SERVER_USER }}
+#           key: ${{ secrets.SSH_PRIVATE_KEY }}
+#           script: |
+#             cd /path/to/groundup-toolkit
+#             git pull origin main
+#             # restart services, etc.
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   - SERVER_HOST: the server IP address
+#   - SERVER_USER: SSH username (e.g. root)
+#   - SSH_PRIVATE_KEY: contents of the private SSH key
+# ---------------------------------------------------------------------------

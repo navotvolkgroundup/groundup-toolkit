@@ -9,6 +9,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   outputFileTracingRoot: __dirname,
   images: {
     remotePatterns: [

@@ -21,7 +21,7 @@ const ALLOWED_ACTIONS: Record<string, { command: string; description: string }> 
 }
 
 export async function POST(req: NextRequest) {
-  const { ok } = limiter.check(req)
+  const { ok } = await limiter.check(req)
   if (!ok) return NextResponse.json({ error: "Too Many Requests" }, { status: 429 })
 
   const session = await auth()

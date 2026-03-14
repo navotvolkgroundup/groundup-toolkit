@@ -7,7 +7,7 @@ import { PIPELINE_STAGES } from "@/lib/constants"
 const limiter = rateLimit({ interval: 60_000, limit: 30 })
 
 export async function GET(req: NextRequest) {
-  const { ok } = limiter.check(req)
+  const { ok } = await limiter.check(req)
   if (!ok) return NextResponse.json({ error: "Too Many Requests" }, { status: 429 })
 
   const session = await auth()

@@ -45,7 +45,7 @@ for (const service of defaultServices) {
 
 export async function GET(req: NextRequest) {
   // Security: rate limiting
-  const { ok } = limiter.check(req)
+  const { ok } = await limiter.check(req)
   if (!ok) {
     return NextResponse.json({ error: "Too Many Requests" }, { status: 429 })
   }
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   // Security: rate limiting
-  const { ok: rl } = limiter.check(req)
+  const { ok: rl } = await limiter.check(req)
   if (!rl) {
     return NextResponse.json({ error: "Too Many Requests" }, { status: 429 })
   }

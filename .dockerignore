@@ -1,0 +1,8 @@
+node_modules
+.git
+__pycache__
+.env
+*.db
+_review/
+_architecture-review/
+_security-audit/

@@ -1,0 +1,43 @@
+services:
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - dashboard/.env
+    depends_on:
+      - redis
+    networks:
+      - groundup
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - groundup
+
+  python-services:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - groundup
+
+networks:
+  groundup:
+    driver: bridge
+
+volumes:
+  redis-data:

@@ -47,7 +47,7 @@ function runAgent(sessionId: string, message: string): Promise<string> {
 }
 
 export async function POST(req: NextRequest) {
-  const { ok } = limiter.check(req)
+  const { ok } = await limiter.check(req)
   if (!ok) {
     return new Response("Too Many Requests", { status: 429 })
   }
