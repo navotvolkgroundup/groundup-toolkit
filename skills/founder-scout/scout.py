@@ -81,12 +81,15 @@ import re
 import json
 import time
 import fcntl
+import logging
 import sqlite3
 import contextlib
 import tempfile
 import subprocess
 import requests
 from datetime import datetime, timedelta
+
+log = logging.getLogger("founder-scout")
 
 # Load shared config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -552,7 +555,7 @@ def linkedin_search(query):
         )
         return result.stdout if result.returncode == 0 else None
     except Exception as e:
-        print(f"  LinkedIn search error: {e}", file=sys.stderr)
+        log.error("LinkedIn search error: %s", e)
         return None
 
 
@@ -612,7 +615,7 @@ def linkedin_profile_lookup(url):
             return None
         return _strip_aria_chrome(result.stdout)
     except Exception as e:
-        print(f"  LinkedIn profile lookup error: {e}", file=sys.stderr)
+        log.error("LinkedIn profile lookup error: %s", e)
         return None
 
 
@@ -748,7 +751,7 @@ def filter_relevant_profiles(profiles):
         # Check for negative signals first
         has_negative = any(neg in headline for neg in NEGATIVE_TITLES)
         if has_negative:
-            print(f"  Filtered out (negative): {p['name']} — {headline}", file=sys.stderr)
+            log.debug("Filtered out (negative): %s — %s", p['name'], headline)
             continue
 
         # Check for established companies — but skip this check if headline
@@ -757,16 +760,16 @@ def filter_relevant_profiles(profiles):
         if not has_left_prefix:
             at_established = any(co in headline for co in ESTABLISHED_COMPANIES)
             if at_established:
-                print(f"  Filtered out (established co): {p['name']} — {headline}", file=sys.stderr)
+                log.debug("Filtered out (established co): %s — %s", p['name'], headline)
                 continue
 
         # Check for positive signals
         has_positive = any(sig in headline for sig in POSITIVE_SIGNALS)
         if has_positive:
-            print(f"  Kept (positive signal): {p['name']} — {headline}", file=sys.stderr)
+            log.debug("Kept (positive signal): %s — %s", p['name'], headline)
             filtered.append(p)
         else:
-            print(f"  Filtered out (no signal): {p['name']} — {headline}", file=sys.stderr)
+            log.debug("Filtered out (no signal): %s — %s", p['name'], headline)
 
     return filtered
 
@@ -818,7 +821,7 @@ NOT RELEVANT (false) means:
         if match:
             return json.loads(match.group())
     except (json.JSONDecodeError, AttributeError):
-        print(f"  Could not parse Claude response for {name}: {response[:200]}", file=sys.stderr)
+        log.warning("Could not parse Claude response for %s: %s", name, response[:200])
     return None
 
 
@@ -942,26 +945,26 @@ def format_briefing_email(recipient_name, high_signals, medium_signals, stats):
 
 def run_daily_scan():
     """Run daily LinkedIn search rotation and send results to team."""
-    print(f"[{datetime.now()}] Starting Founder Scout daily scan (LinkedIn-only)...")
+    log.info("Starting Founder Scout daily scan (LinkedIn-only)...")
 
     db = ScoutDatabase(DB_PATH)
 
     # LinkedIn browser is REQUIRED
     if not linkedin_browser_available():
-        print("  ERROR: LinkedIn browser not available. Cannot run scan.", file=sys.stderr)
+        log.error("LinkedIn browser not available. Cannot run scan.")
         db.log_scan('daily_search')
         return
 
-    print("  LinkedIn browser: available")
+    log.info("LinkedIn browser: available")
 
     # Get queries due to run
     queue = db.get_rotation_queue(MAX_QUERIES_PER_SCAN)
     if not queue:
-        print("  No queries due to run today.")
+        log.info("No queries due to run today.")
         db.log_scan('daily_search')
         return
 
-    print(f"  Running {len(queue)} LinkedIn searches...")
+    log.info("Running %d LinkedIn searches...", len(queue))
 
     all_new_profiles = []
     seen_urls = set()  # Deduplicate across queries
@@ -969,14 +972,14 @@ def run_daily_scan():
     for query_key in queue:
         info = SEARCH_QUERIES[query_key]
         query = info['query']
-        print(f"    [{query_key}] Searching LinkedIn: {query}...")
+        log.info("[%s] Searching LinkedIn: %s...", query_key, query)
 
         search_snapshot = linkedin_search(query)
         db.update_rotation(query_key)
         time.sleep(LINKEDIN_NAV_DELAY)
 
         if not search_snapshot:
-            print(f"      No search results returned.")
+            log.warning("No search results returned.")
             continue
 
         profiles = extract_profiles_from_search(search_snapshot)
@@ -993,55 +996,55 @@ def run_daily_scan():
             new_profiles.append(p)
 
         skipped = len(profiles) - len(new_profiles)
-        msg = f"      Found {len(new_profiles)} new profiles"
+        msg = f"Found {len(new_profiles)} new profiles"
         if skipped:
             msg += f" ({skipped} already seen)"
-        print(msg)
+        log.info(msg)
         all_new_profiles.extend(new_profiles)
 
     if not all_new_profiles:
-        print("\n  No new profiles found today.")
+        log.info("No new profiles found today.")
         db.log_scan('daily_search', queries_run=len(queue))
         return
 
     # Phase 1: Keyword filter on headlines (fast, removes obvious non-matches)
-    print(f"\n  Phase 1: Keyword filtering {len(all_new_profiles)} profiles...")
+    log.info("Phase 1: Keyword filtering %d profiles...", len(all_new_profiles))
     keyword_matches = filter_relevant_profiles(all_new_profiles)
-    print(f"  {len(keyword_matches)} passed keyword filter (out of {len(all_new_profiles)})")
+    log.info("%d passed keyword filter (out of %d)", len(keyword_matches), len(all_new_profiles))
 
     # Mark ALL profiles as sent (including filtered-out ones, so they don't reappear)
     db.mark_profiles_sent(all_new_profiles)
 
     if not keyword_matches:
-        print("\n  No relevant profiles found today, skipping email.")
+        log.info("No relevant profiles found today, skipping email.")
         db.log_scan('daily_search', queries_run=len(queue), people_found=0)
-        print(f"\n  Scan complete: {len(queue)} searches, 0 relevant profiles")
+        log.info("Scan complete: %d searches, 0 relevant profiles", len(queue))
         return
 
     # Phase 2: Visit each profile + Claude deep filter (accurate, ~15s per profile)
-    print(f"\n  Phase 2: Visiting {len(keyword_matches)} profiles for deep analysis...")
+    log.info("Phase 2: Visiting %d profiles for deep analysis...", len(keyword_matches))
     relevant = []
     for i, p in enumerate(keyword_matches, 1):
         name = p['name']
         url = p['linkedin_url']
-        print(f"    [{i}/{len(keyword_matches)}] Visiting {name}...")
+        log.info("[%d/%d] Visiting %s...", i, len(keyword_matches), name)
 
         profile_text = linkedin_profile_lookup(url)
         time.sleep(LINKEDIN_NAV_DELAY)
 
         if not profile_text:
-            print(f"      Could not load profile, skipping.")
+            log.warning("Could not load profile, skipping.")
             continue
 
         analysis = analyze_linkedin_profile(name, profile_text, url, MAX_CLAUDE_CALLS_PER_SCAN - len(relevant))
         if not analysis:
-            print(f"      Claude analysis failed, skipping.")
+            log.warning("Claude analysis failed, skipping.")
             continue
 
         if analysis.get('relevant'):
             summary = analysis.get('summary', '')
             title = analysis.get('current_title', '')
-            print(f"      RELEVANT: {summary}")
+            log.info("RELEVANT: %s", summary)
             p['analysis_summary'] = summary
             p['current_title'] = title
 
@@ -1059,23 +1062,23 @@ def run_daily_scan():
             gh_url = extract_github_from_linkedin(profile_text)
             if gh_url:
                 p['github_url'] = gh_url
-                print(f"      Found GitHub: {gh_url}")
+                log.info("Found GitHub: %s", gh_url)
                 if person_id:
                     db.set_github_url(person_id, gh_url)
 
             relevant.append(p)
         else:
             summary = analysis.get('summary', 'Not relevant')
-            print(f"      Filtered out: {summary}")
+            log.debug("Filtered out: %s", summary)
 
-    print(f"\n  {len(relevant)} confirmed relevant (out of {len(keyword_matches)} keyword matches)")
+    log.info("%d confirmed relevant (out of %d keyword matches)", len(relevant), len(keyword_matches))
 
     # Send results to team
     if relevant:
         date_str = datetime.now().strftime('%b %d, %Y')
         subject = f"Founder Scout - {date_str}"
 
-        print(f"\n  Sending results ({len(relevant)} people) to team...")
+        log.info("Sending results (%d people) to team...", len(relevant))
         for recipient in SCOUT_RECIPIENTS:
             email_body = format_scan_email(recipient['first_name'], relevant)
             send_email(recipient['email'], subject, email_body)
@@ -1083,7 +1086,7 @@ def run_daily_scan():
             wa_message = format_scan_whatsapp(recipient['first_name'], relevant)
             send_whatsapp(recipient['phone'], wa_message)
         # Push to HubSpot as leads
-        print(f"\n  Syncing {len(relevant)} leads to HubSpot...")
+        log.info("Syncing %d leads to HubSpot...", len(relevant))
         for p in relevant:
             name = p.get('name', '')
             url = p.get('url', '')
@@ -1100,13 +1103,13 @@ def run_daily_scan():
 
             if existing:
                 hubspot_id = existing['id']
-                print(f"    {name}: already in HubSpot ({hubspot_id})")
+                log.info("%s: already in HubSpot (%s)", name, hubspot_id)
             else:
                 hubspot_id = create_contact(firstname, lastname, url, {'lifecyclestage': 'lead', 'hs_lead_status': 'NEW'})
                 if hubspot_id:
-                    print(f"    {name}: created in HubSpot ({hubspot_id})")
+                    log.info("%s: created in HubSpot (%s)", name, hubspot_id)
                 else:
-                    print(f"    {name}: failed to create in HubSpot", file=sys.stderr)
+                    log.error("%s: failed to create in HubSpot", name)
                     continue
 
             # Link to tracked person in local DB
@@ -1115,15 +1118,15 @@ def run_daily_scan():
             if person_id and hubspot_id:
                 db.set_hubspot_contact_id(person_id, str(hubspot_id))
     else:
-        print("\n  No relevant profiles after deep analysis, skipping email.")
+        log.info("No relevant profiles after deep analysis, skipping email.")
 
     db.log_scan('daily_search', queries_run=len(queue), people_found=len(relevant))
-    print(f"\n  Scan complete: {len(queue)} searches, {len(relevant)} relevant profiles")
+    log.info("Scan complete: %d searches, %d relevant profiles", len(queue), len(relevant))
 
 
 def run_weekly_briefing():
     """Send weekly watchlist update — signals from tracked people."""
-    print(f"[{datetime.now()}] Sending Founder Scout weekly briefing...")
+    log.info("Sending Founder Scout weekly briefing...")
 
     db = ScoutDatabase(DB_PATH)
     since = (datetime.now() - timedelta(days=7)).isoformat()
@@ -1142,33 +1145,33 @@ def run_weekly_briefing():
         email_body = format_briefing_email(
             recipient['first_name'], high_signals, medium_signals, stats
         )
-        print(f"  Sending email to {recipient['email']}...")
+        log.info("Sending email to %s...", recipient['email'])
         send_email(recipient['email'], subject, email_body)
 
     db.log_scan('weekly_briefing', signals_detected=len(recent_signals))
-    print(f"  Briefing sent: {len(high_signals)} high, {len(medium_signals)} medium")
+    log.info("Briefing sent: %d high, %d medium", len(high_signals), len(medium_signals))
 
 
 def run_watchlist_update():
     """Re-scan existing tracked people for new signals via LinkedIn."""
-    print(f"[{datetime.now()}] Running Founder Scout watchlist update (LinkedIn-only)...")
+    log.info("Running Founder Scout watchlist update (LinkedIn-only)...")
 
     db = ScoutDatabase(DB_PATH)
     people = db.get_active_people()
 
     if not people:
-        print("  No active people in watchlist.")
+        log.info("No active people in watchlist.")
         db.log_scan('watchlist_update')
         return
 
     # LinkedIn browser is REQUIRED
     if not linkedin_browser_available():
-        print("  ERROR: LinkedIn browser not available. Cannot run watchlist update.", file=sys.stderr)
+        log.error("LinkedIn browser not available. Cannot run watchlist update.")
         db.log_scan('watchlist_update')
         return
 
-    print(f"  LinkedIn browser: available")
-    print(f"  Re-scanning {len(people)} active people...")
+    log.info("LinkedIn browser: available")
+    log.info("Re-scanning %d active people...", len(people))
 
     claude_calls = 0
     profile_lookups = 0
@@ -1182,7 +1185,7 @@ def run_watchlist_update():
 
         name = person['name']
         linkedin_url = person.get('linkedin_url')
-        print(f"    Checking {name}...")
+        log.debug("Checking %s...", name)
 
         profile_text = None
 
@@ -1193,7 +1196,7 @@ def run_watchlist_update():
             profile_lookups += 1
         else:
             # Try to find them via LinkedIn search
-            print(f"      Searching LinkedIn for {name}...")
+            log.debug("Searching LinkedIn for %s...", name)
             time.sleep(LINKEDIN_NAV_DELAY)
             search_text = linkedin_search(name)
             if search_text:
@@ -1202,7 +1205,7 @@ def run_watchlist_update():
                 )
                 if li_match:
                     linkedin_url = li_match.group(1)
-                    print(f"      Found profile: {linkedin_url}")
+                    log.info("Found profile: %s", linkedin_url)
                     # Update the person's LinkedIn URL in the DB
                     with db._conn() as conn:
                         conn.execute(
@@ -1228,7 +1231,7 @@ def run_watchlist_update():
             gh_url = extract_github_from_linkedin(profile_text)
             if gh_url:
                 db.set_github_url(person['id'], gh_url)
-                print(f"      Found GitHub: {gh_url}")
+                log.info("Found GitHub: %s", gh_url)
 
         # --- v2 piggyback analysis (no extra LinkedIn requests) ---
         try:
@@ -1238,7 +1241,7 @@ def run_watchlist_update():
                 with db._conn() as conn:
                     save_idf_profile(conn, person['id'], idf_data)
                     conn.commit()
-                print(f"      IDF: {idf_data.get('unit', '?')} ({idf_data.get('level', '?')})")
+                log.info("IDF: %s (%s)", idf_data.get('unit', '?'), idf_data.get('level', '?'))
 
             # Activity metrics for going-dark detection
             metrics = extract_activity_metrics(profile_text)
@@ -1251,7 +1254,7 @@ def run_watchlist_update():
                     db.record_signal(person['id'], dark_signal['signal_type'],
                                      dark_signal['tier'], dark_signal['description'], linkedin_url)
                     new_signals += 1
-                    print(f"      Going dark: {dark_signal['description'][:60]}")
+                    log.info("Going dark: %s", dark_signal['description'][:60])
 
             # Advisory role tracking
             advisory_roles = extract_advisory_roles(profile_text)
@@ -1269,7 +1272,7 @@ def run_watchlist_update():
                 db.record_signal(person['id'], adv_signal['signal_type'],
                                  adv_signal['tier'], adv_signal['description'], linkedin_url)
                 new_signals += 1
-                print(f"      Advisory: {adv_signal['description'][:60]}")
+                log.info("Advisory: %s", adv_signal['description'][:60])
 
             # Social graph: lawyer/VC connections
             social_signals = detect_lawyer_vc_connections(profile_text, name)
@@ -1291,9 +1294,9 @@ def run_watchlist_update():
                              'linkedin_mention', vm.get('detail', ''), datetime.now().isoformat())
                         )
                     conn.commit()
-                print(f"      VC mentions: {len(vc_mentions)}")
+                log.info("VC mentions: %d", len(vc_mentions))
         except Exception as e:
-            print(f"      v2 analysis error: {e}", file=sys.stderr)
+            log.error("v2 analysis error: %s", e)
 
         # Claude analysis for change detection
         if claude_calls > 0:
@@ -1332,7 +1335,7 @@ Return ONLY valid JSON:
                                 analysis['confidence'], new_summary, linkedin_url
                             )
                             new_signals += 1
-                            print(f"      New signal: {new_summary[:60]}")
+                            log.info("New signal: %s", new_summary[:60])
             except (json.JSONDecodeError, AttributeError):
                 pass
 
@@ -1345,8 +1348,8 @@ Return ONLY valid JSON:
             conn.commit()
 
     db.log_scan('watchlist_update', queries_run=len(people), signals_detected=new_signals)
-    print(f"  Watchlist update complete: {len(people)} checked, {new_signals} new signals, "
-          f"{claude_calls} Claude calls, {profile_lookups} LinkedIn lookups")
+    log.info("Watchlist update complete: %d checked, %d new signals, %d Claude calls, %d LinkedIn lookups",
+             len(people), new_signals, claude_calls, profile_lookups)
 
 
 def run_status():
@@ -1355,26 +1358,26 @@ def run_status():
     stats = db.get_stats()
     people = db.get_active_people()
 
-    print(f"Founder Scout Status — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print("=" * 60)
-    print(f"  Active people: {stats['active']}")
-    print(f"  High signal: {stats['high']}")
-    print(f"  Medium signal: {stats['medium']}")
-    print(f"  Low signal: {stats['low']}")
-    print(f"  Total signals recorded: {stats['total_signals']}")
-    print(f"  Total scans run: {stats['total_scans']}")
+    log.info("Founder Scout Status — %s", datetime.now().strftime('%Y-%m-%d %H:%M'))
+    log.info("=" * 60)
+    log.info("Active people: %d", stats['active'])
+    log.info("High signal: %d", stats['high'])
+    log.info("Medium signal: %d", stats['medium'])
+    log.info("Low signal: %d", stats['low'])
+    log.info("Total signals recorded: %d", stats['total_signals'])
+    log.info("Total scans run: %d", stats['total_scans'])
 
     if people:
-        print(f"\n  Active Watchlist:")
+        log.info("Active Watchlist:")
         for p in people:
             tier_label = f"[{p['signal_tier'].upper()}]" if p.get('signal_tier') else "[---]"
             li = f" ({p['linkedin_url']})" if p.get('linkedin_url') else ""
             signal = f" — {p['last_signal'][:60]}" if p.get('last_signal') else ""
-            approached = " ✓approached" if p.get('approached') else ""
+            approached = " approached" if p.get('approached') else ""
             hs = f" [HS:{p['hubspot_contact_id']}]" if p.get('hubspot_contact_id') else ""
-            print(f"    {tier_label} {p['name']}{approached}{hs}{li}{signal}")
+            log.info("%s %s%s%s%s%s", tier_label, p['name'], approached, hs, li, signal)
     else:
-        print("\n  No people tracked yet. Run 'founder-scout scan' to start.")
+        log.info("No people tracked yet. Run 'founder-scout scan' to start.")
 
 
 def run_add(name, linkedin_url=None):
@@ -1382,31 +1385,31 @@ def run_add(name, linkedin_url=None):
     db = ScoutDatabase(DB_PATH)
     person_id = db.add_person(name, linkedin_url or None, 'manual')
     if person_id:
-        print(f"Added {name} to watchlist (id={person_id})")
+        log.info("Added %s to watchlist (id=%d)", name, person_id)
         if linkedin_url:
-            print(f"  LinkedIn: {linkedin_url}")
+            log.info("LinkedIn: %s", linkedin_url)
     else:
-        print(f"Could not add {name} (may already exist)")
+        log.warning("Could not add %s (may already exist)", name)
 
 
 def run_dismiss(person_id):
     """Mark a person as dismissed."""
     db = ScoutDatabase(DB_PATH)
     db.dismiss_person(int(person_id))
-    print(f"Dismissed person id={person_id}")
+    log.info("Dismissed person id=%s", person_id)
 
 
 # --- HubSpot Sync ---
 
 def run_sync_hubspot():
     """Sync tracked people to HubSpot as contacts (leads)."""
-    print(f"[{datetime.now()}] Syncing Founder Scout leads to HubSpot...")
+    log.info("Syncing Founder Scout leads to HubSpot...")
 
     db = ScoutDatabase(DB_PATH)
     people = db.get_active_people()
 
     if not people:
-        print("  No active people to sync.")
+        log.info("No active people to sync.")
         return
 
     created = 0
@@ -1445,7 +1448,7 @@ def run_sync_hubspot():
                 props['hs_lead_status'] = 'ATTEMPTED_TO_CONTACT'
             update_contact(hubspot_id, props)
             updated += 1
-            print(f"  Linked existing: {name} → {hubspot_id}")
+            log.info("Linked existing: %s -> %s", name, hubspot_id)
             continue
 
         # Create new contact
@@ -1462,12 +1465,12 @@ def run_sync_hubspot():
             db.set_hubspot_contact_id(person['id'], contact_id)
             created += 1
         else:
-            print(f"  Failed to create contact for {name}", file=sys.stderr)
+            log.error("Failed to create contact for %s", name)
 
     # Auto-detect approached: check if any tracked person matches a HubSpot deal
     auto_approached = _auto_detect_approached(db, people)
 
-    print(f"  Sync complete: {created} created, {updated} updated, {skipped} skipped, {auto_approached} auto-approached")
+    log.info("Sync complete: %d created, %d updated, %d skipped, %d auto-approached", created, updated, skipped, auto_approached)
 
 
 def _auto_detect_approached(db, people):
@@ -1494,7 +1497,7 @@ def _auto_detect_approached(db, people):
                 if name:
                     all_deal_names.add(name.lower().strip())
     except Exception as e:
-        print(f"  Auto-detect: failed to fetch deals: {e}", file=sys.stderr)
+        log.error("Auto-detect: failed to fetch deals: %s", e)
         return 0
 
     if not all_deal_names:
@@ -1522,7 +1525,7 @@ def _auto_detect_approached(db, people):
             hubspot_id = person.get('hubspot_contact_id')
             if hubspot_id:
                 update_contact(hubspot_id, {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'})
-            print(f"  Auto-approached: {person['name']} (matched deal)")
+            log.info("Auto-approached: %s (matched deal)", person['name'])
             count += 1
 
     return count
@@ -1534,17 +1537,17 @@ def run_approach(name_query):
     matches = db.search_person_by_name(name_query)
 
     if not matches:
-        print(f"No active person found matching '{name_query}'.")
-        print("Tip: use 'founder-scout status' to see the full watchlist.")
+        log.warning("No active person found matching '%s'.", name_query)
+        log.info("Tip: use 'founder-scout status' to see the full watchlist.")
         sys.exit(1)
 
     if len(matches) > 1:
-        print(f"Multiple matches for '{name_query}':")
+        log.warning("Multiple matches for '%s':", name_query)
         for m in matches:
             tier = f"[{m['signal_tier'].upper()}]" if m.get('signal_tier') else "[---]"
             approached = " (approached)" if m.get('approached') else ""
-            print(f"  id={m['id']} {tier} {m['name']}{approached}")
-        print("\nUse a more specific name or 'founder-scout approach-id <id>'.")
+            log.info("id=%d %s %s%s", m['id'], tier, m['name'], approached)
+        log.info("Use a more specific name or 'founder-scout approach-id <id>'.")
         return
 
     person = matches[0]
@@ -1553,15 +1556,15 @@ def run_approach(name_query):
 
     # Mark in local DB
     db.mark_approached(person_id)
-    print(f"Marked {name} as approached.")
+    log.info("Marked %s as approached.", name)
 
     # Update HubSpot if contact exists
     hubspot_id = person.get('hubspot_contact_id')
     if hubspot_id:
         update_contact(hubspot_id, {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'})
-        print(f"  HubSpot contact {hubspot_id} updated: hs_lead_status → ATTEMPTED_TO_CONTACT")
+        log.info("HubSpot contact %s updated: hs_lead_status -> ATTEMPTED_TO_CONTACT", hubspot_id)
     else:
-        print(f"  No HubSpot contact yet. Run 'founder-scout sync-hubspot' to create it.")
+        log.info("No HubSpot contact yet. Run 'founder-scout sync-hubspot' to create it.")
 
 
 def run_approach_by_id(person_id):
@@ -1574,17 +1577,17 @@ def run_approach_by_id(person_id):
         ).fetchone()
 
     if not person:
-        print(f"No person found with id={person_id}")
+        log.error("No person found with id=%s", person_id)
         sys.exit(1)
 
     person = dict(person)
     db.mark_approached(person['id'])
-    print(f"Marked {person['name']} (id={person_id}) as approached.")
+    log.info("Marked %s (id=%s) as approached.", person['name'], person_id)
 
     hubspot_id = person.get('hubspot_contact_id')
     if hubspot_id:
         update_contact(hubspot_id, {'hs_lead_status': 'ATTEMPTED_TO_CONTACT'})
-        print(f"  HubSpot contact {hubspot_id} updated: hs_lead_status → ATTEMPTED_TO_CONTACT")
+        log.info("HubSpot contact %s updated: hs_lead_status -> ATTEMPTED_TO_CONTACT", hubspot_id)
 
 
 # --- GitHub Scanning ---
@@ -1617,20 +1620,20 @@ def github_fetch_events(username, max_pages=2):
                 headers=_github_headers(), timeout=10
             )
             if resp.status_code == 404:
-                print(f"    GitHub user {username}: not found", file=sys.stderr)
+                log.warning("GitHub user %s: not found", username)
                 return []
             if resp.status_code == 403:
-                print(f"    GitHub API rate limited", file=sys.stderr)
+                log.warning("GitHub API rate limited")
                 return events
             if resp.status_code != 200:
-                print(f"    GitHub API error: {resp.status_code}", file=sys.stderr)
+                log.error("GitHub API error: %d", resp.status_code)
                 return events
             page_events = resp.json()
             if not page_events:
                 break
             events.extend(page_events)
         except Exception as e:
-            print(f"    GitHub fetch error: {e}", file=sys.stderr)
+            log.error("GitHub fetch error: %s", e)
             break
     return events
 
@@ -1778,18 +1781,18 @@ def extract_github_from_linkedin(profile_text):
 
 def run_github_scan():
     """Scan GitHub activity of tracked founders who have GitHub URLs."""
-    print(f"[{datetime.now()}] Running Founder Scout GitHub scan...")
+    log.info("Running Founder Scout GitHub scan...")
 
     db = ScoutDatabase(DB_PATH)
     people = db.get_people_with_github()
 
     if not people:
-        print("  No tracked people with GitHub URLs.")
-        print("  Tip: GitHub URLs are extracted from LinkedIn profiles during watchlist-update.")
+        log.info("No tracked people with GitHub URLs.")
+        log.info("Tip: GitHub URLs are extracted from LinkedIn profiles during watchlist-update.")
         db.log_scan('github_scan')
         return
 
-    print(f"  Scanning {len(people)} GitHub profiles...")
+    log.info("Scanning %d GitHub profiles...", len(people))
     total_signals = 0
 
     for person in people:
@@ -1797,10 +1800,10 @@ def run_github_scan():
         github_url = person['github_url']
         username = github_username_from_url(github_url)
         if not username:
-            print(f"    {name}: invalid GitHub URL '{github_url}', skipping")
+            log.warning("%s: invalid GitHub URL '%s', skipping", name, github_url)
             continue
 
-        print(f"    [{person['id']}] {name} (@{username})...")
+        log.debug("[%d] %s (@%s)...", person['id'], name, username)
         last_scanned = person.get('github_last_scanned')
 
         signals = analyze_github_activity(username, name, last_scanned)
@@ -1808,13 +1811,12 @@ def run_github_scan():
         for sig in signals:
             db.record_signal(person['id'], sig['type'], sig['tier'], sig['description'], sig.get('url'))
             total_signals += 1
-            tier_label = sig['tier'].upper()
-            print(f"      [{tier_label}] {sig['description'][:80]}")
+            log.info("[%s] %s", sig['tier'].upper(), sig['description'][:80])
 
         db.update_github_scanned(person['id'])
         time.sleep(1)  # Be polite to GitHub API
 
-    print(f"  GitHub scan complete: {len(people)} profiles, {total_signals} signals detected.")
+    log.info("GitHub scan complete: %d profiles, %d signals detected.", len(people), total_signals)
     db.log_scan('github_scan', queries_run=len(people), signals_detected=total_signals)
 
     # Send alerts for high-tier GitHub signals
@@ -1835,14 +1837,14 @@ def run_github_scan():
 
             for recip in SCOUT_RECIPIENTS:
                 send_email(recip['email'], subject, '\n'.join(body_lines))
-                print(f"  Emailed {recip['first_name']}")
+                log.info("Emailed %s", recip['first_name'])
 
 
 # --- v2 Actions ---
 
 def run_registrar_scan():
     """Scan Israeli Companies Registrar for new tech company registrations."""
-    print(f"[{datetime.now()}] Running Companies Registrar scan...")
+    log.info("Running Companies Registrar scan...")
     db = ScoutDatabase(DB_PATH)
     people = db.get_active_people()
     with db._conn() as conn:
@@ -1853,8 +1855,8 @@ def run_registrar_scan():
         if person_id:
             db.record_signal(person_id, 'company_registration', sig.get('tier', 'high'),
                              sig['description'], sig.get('registration_number'))
-        print(f"  [{sig.get('tier', '?').upper()}] {sig['description'][:80]}")
-    print(f"  Registrar scan complete: {len(signals)} signals.")
+        log.info("[%s] %s", sig.get('tier', '?').upper(), sig['description'][:80])
+    log.info("Registrar scan complete: %d signals.", len(signals))
     db.log_scan('registrar_scan', signals_detected=len(signals))
 
     # Immediate alert for company registration matches
@@ -1872,18 +1874,18 @@ def run_registrar_scan():
 
 def run_retention_update():
     """Recalculate retention clock statuses for all acquisition founders."""
-    print(f"[{datetime.now()}] Updating retention clocks...")
+    log.info("Updating retention clocks...")
     db = ScoutDatabase(DB_PATH)
     with db._conn() as conn:
         changes = update_all_statuses(conn)
         conn.commit()
     if changes:
         for c in changes:
-            print(f"  Status change: {c.get('name', '?')} -> {c.get('new_status', '?')}")
+            log.info("Status change: %s -> %s", c.get('name', '?'), c.get('new_status', '?'))
     approaching = []
     with db._conn() as conn:
         approaching = get_approaching_founders(conn)
-    print(f"  {len(approaching)} founders approaching/imminent vesting end.")
+    log.info("%d founders approaching/imminent vesting end.", len(approaching))
 
     # Add approaching founders to watchlist if not already tracked
     for f in approaching:
@@ -1896,25 +1898,25 @@ def run_retention_update():
                                      'high' if f.get('current_status') == 'IMMINENT' else 'medium',
                                      f"Vesting {f.get('current_status', '?')} at {f.get('acquiring_company', '?')} (acquired {f.get('acquired_company', '?')})",
                                      f.get('founder_linkedin_url'))
-                    print(f"  Added to watchlist: {f['founder_name']} ({f.get('current_status')})")
+                    log.info("Added to watchlist: %s (%s)", f['founder_name'], f.get('current_status'))
 
     db.log_scan('retention_update', signals_detected=len(changes))
 
 
 def run_acquisition_scan():
     """Monthly scan for new Israeli startup acquisitions via Brave Search."""
-    print(f"[{datetime.now()}] Scanning for new acquisitions...")
+    log.info("Scanning for new acquisitions...")
     db = ScoutDatabase(DB_PATH)
     with db._conn() as conn:
         count = scan_for_acquisitions(conn, brave_search)
         conn.commit()
-    print(f"  Found {count} new acquisitions.")
+    log.info("Found %d new acquisitions.", count)
     db.log_scan('acquisition_scan', people_found=count)
 
 
 def run_domain_scan():
     """Check domain registrations for watchlist members."""
-    print(f"[{datetime.now()}] Running domain scan...")
+    log.info("Running domain scan...")
     db = ScoutDatabase(DB_PATH)
     people = db.get_active_people()
     total_signals = 0
@@ -1929,15 +1931,15 @@ def run_domain_scan():
                 db.record_signal(person['id'], 'domain_registration',
                                  sig['signal_level'].lower(), sig.get('description', f"Domain: {sig.get('domain_name')}"))
                 total_signals += 1
-                print(f"  [{sig['signal_level']}] {person['name']}: {sig.get('domain_name')}")
+                log.info("[%s] %s: %s", sig['signal_level'], person['name'], sig.get('domain_name'))
         time.sleep(0.5)  # Rate limiting for DNS lookups
-    print(f"  Domain scan complete: {total_signals} signals.")
+    log.info("Domain scan complete: %d signals.", total_signals)
     db.log_scan('domain_scan', queries_run=len(people), signals_detected=total_signals)
 
 
 def run_event_scan():
     """Weekly scan for watchlist members at startup events."""
-    print(f"[{datetime.now()}] Running event/hackathon scan...")
+    log.info("Running event/hackathon scan...")
     db = ScoutDatabase(DB_PATH)
     people = db.get_active_people()
     with db._conn() as conn:
@@ -1949,13 +1951,13 @@ def run_event_scan():
             db.record_signal(person_id, 'event_appearance',
                              sig.get('signal_level', 'medium').lower(),
                              sig.get('description', ''))
-    print(f"  Event scan complete: {len(signals)} signals.")
+    log.info("Event scan complete: %d signals.", len(signals))
     db.log_scan('event_scan', signals_detected=len(signals))
 
 
 def run_score_update():
     """Recalculate composite scores for all tracked people."""
-    print(f"[{datetime.now()}] Recalculating composite scores...")
+    log.info("Recalculating composite scores...")
     db = ScoutDatabase(DB_PATH)
     people = db.get_active_people()
     since_30d = (datetime.now() - timedelta(days=30)).isoformat()
@@ -2005,23 +2007,23 @@ def run_score_update():
                 conn.commit()
 
             if score_data['classification'] in ('CRITICAL', 'HIGH'):
-                print(f"  {person['name']}: {score_data['composite_score']} ({score_data['classification']})")
+                log.info("%s: %d (%s)", person['name'], score_data['composite_score'], score_data['classification'])
         except Exception as e:
-            print(f"  Score error for {person['name']}: {e}", file=sys.stderr)
+            log.error("Score error for %s: %s", person['name'], e)
 
     # Check for classification changes
     with db._conn() as conn:
         changes = get_score_changes(conn, days=1)
     if changes:
-        print(f"  Score changes today: {len(changes)}")
+        log.info("Score changes today: %d", len(changes))
 
     db.log_scan('score_update', queries_run=len(people))
-    print(f"  Score update complete for {len(people)} people.")
+    log.info("Score update complete for %d people.", len(people))
 
 
 def run_daily_digest():
     """Send daily digest of CRITICAL and HIGH signals from the past 24 hours."""
-    print(f"[{datetime.now()}] Sending daily digest...")
+    log.info("Sending daily digest...")
     db = ScoutDatabase(DB_PATH)
     since = (datetime.now() - timedelta(hours=24)).isoformat()
     recent_signals = db.get_signals_since(since)
@@ -2032,7 +2034,7 @@ def run_daily_digest():
     high = [p for p in people if p.get('score_classification') == 'HIGH']
 
     if not recent_signals and not critical:
-        print("  No signals or CRITICAL scores in the last 24h. Skipping digest.")
+        log.info("No signals or CRITICAL scores in the last 24h. Skipping digest.")
         return
 
     date_str = datetime.now().strftime('%b %d, %Y')
@@ -2096,21 +2098,21 @@ def run_daily_digest():
         ])
 
         send_email(recipient['email'], subject, '\n'.join(lines))
-        print(f"  Sent digest to {recipient['first_name']}")
+        log.info("Sent digest to %s", recipient['first_name'])
 
     db.log_scan('daily_digest')
 
 
 def run_enhanced_github_scan():
     """Enhanced GitHub scan with deep repo analysis, npm tracking, and infra detection."""
-    print(f"[{datetime.now()}] Running enhanced GitHub scan...")
+    log.info("Running enhanced GitHub scan...")
 
     db = ScoutDatabase(DB_PATH)
     people = db.get_people_with_github()
     github_token = os.environ.get('GITHUB_TOKEN', '')
 
     if not people:
-        print("  No tracked people with GitHub URLs.")
+        log.info("No tracked people with GitHub URLs.")
         db.log_scan('github_scan')
         return
 
@@ -2120,10 +2122,10 @@ def run_enhanced_github_scan():
         gh_url = search_github_user(person['name'], token=github_token)
         if gh_url:
             db.set_github_url(person['id'], gh_url)
-            print(f"  Found GitHub for {person['name']}: {gh_url}")
+            log.info("Found GitHub for %s: %s", person['name'], gh_url)
             people.append(person)
 
-    print(f"  Scanning {len(people)} GitHub profiles...")
+    log.info("Scanning %d GitHub profiles...", len(people))
     total_signals = 0
 
     for person in people:
@@ -2135,7 +2137,7 @@ def run_enhanced_github_scan():
         if not username:
             continue
 
-        print(f"    {name} (@{username})...")
+        log.debug("%s (@%s)...", name, username)
         last_scanned = person.get('github_last_scanned')
 
         # Use enhanced scan
@@ -2144,12 +2146,12 @@ def run_enhanced_github_scan():
         for sig in signals:
             db.record_signal(person['id'], sig['type'], sig['tier'], sig['description'], sig.get('url'))
             total_signals += 1
-            print(f"      [{sig['tier'].upper()}] {sig['description'][:80]}")
+            log.info("[%s] %s", sig['tier'].upper(), sig['description'][:80])
 
         db.update_github_scanned(person['id'])
         time.sleep(1)
 
-    print(f"  Enhanced GitHub scan complete: {len(people)} profiles, {total_signals} signals.")
+    log.info("Enhanced GitHub scan complete: %d profiles, %d signals.", len(people), total_signals)
     db.log_scan('github_scan', queries_run=len(people), signals_detected=total_signals)
 
     # Immediate alerts for HIGH signals
@@ -2178,11 +2180,11 @@ def run_status_v2():
     stats = db.get_stats()
     people = db.get_active_people()
 
-    print(f"Founder Scout v2 Status - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print("=" * 70)
-    print(f"  Active watchlist: {stats['active']}")
-    print(f"  Total signals: {stats['total_signals']}")
-    print(f"  Total scans: {stats['total_scans']}")
+    log.info("Founder Scout v2 Status - %s", datetime.now().strftime('%Y-%m-%d %H:%M'))
+    log.info("=" * 70)
+    log.info("Active watchlist: %d", stats['active'])
+    log.info("Total signals: %d", stats['total_signals'])
+    log.info("Total scans: %d", stats['total_scans'])
 
     # Score distribution
     critical = [p for p in people if p.get('score_classification') == 'CRITICAL']
@@ -2190,44 +2192,54 @@ def run_status_v2():
     medium = [p for p in people if p.get('score_classification') == 'MEDIUM']
     low = [p for p in people if p.get('score_classification') in ('LOW', 'WATCHING', None)]
 
-    print(f"\n  Score Distribution:")
-    print(f"    CRITICAL: {len(critical)} | HIGH: {len(high)} | MEDIUM: {len(medium)} | LOW/WATCHING: {len(low)}")
+    log.info("Score Distribution:")
+    log.info("CRITICAL: %d | HIGH: %d | MEDIUM: %d | LOW/WATCHING: %d", len(critical), len(high), len(medium), len(low))
 
     if critical:
-        print(f"\n  CRITICAL Priority:")
+        log.info("CRITICAL Priority:")
         for p in critical:
             score = p.get('composite_score', 0)
             signal = p.get('last_signal', '')[:50]
             li = f" {p['linkedin_url']}" if p.get('linkedin_url') else ""
-            print(f"    [{score}] {p['name']}{li}")
+            log.info("[%d] %s%s", score, p['name'], li)
             if signal:
-                print(f"          {signal}")
+                log.info("    %s", signal)
 
     if high:
-        print(f"\n  HIGH Priority:")
+        log.info("HIGH Priority:")
         for p in high:
             score = p.get('composite_score', 0)
             approached = " [approached]" if p.get('approached') else ""
-            print(f"    [{score}] {p['name']}{approached}")
+            log.info("[%d] %s%s", score, p['name'], approached)
 
     # Retention clocks
     with db._conn() as conn:
         imminent = get_expiring_founders(conn, 'IMMINENT')
         approaching = get_approaching_founders(conn)
     if imminent or approaching:
-        print(f"\n  Retention Clocks:")
+        log.info("Retention Clocks:")
         for f in imminent:
-            print(f"    IMMINENT: {f.get('founder_name', '?')} ({f.get('acquired_company', '?')})")
+            log.info("IMMINENT: %s (%s)", f.get('founder_name', '?'), f.get('acquired_company', '?'))
         for f in approaching:
             if f.get('current_status') != 'IMMINENT':
-                print(f"    APPROACHING: {f.get('founder_name', '?')} ({f.get('acquired_company', '?')})")
+                log.info("APPROACHING: %s (%s)", f.get('founder_name', '?'), f.get('acquired_company', '?'))
 
 
 # --- Entry Point ---
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler("/var/log/founder-scout.log"),
+        ],
+    )
+
     if len(sys.argv) < 2:
-        print(__doc__)
+        log.info(__doc__)
         sys.exit(1)
 
     action = sys.argv[1]
@@ -2237,7 +2249,7 @@ def main():
         try:
             fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print("Another instance is running, skipping.")
+            log.warning("Another instance is running, skipping.")
             return
         try:
             run_daily_scan()
@@ -2256,7 +2268,7 @@ def main():
 
     elif action == 'add':
         if len(sys.argv) < 3:
-            print("Usage: scout.py add <name> [linkedin_url]")
+            log.error("Usage: scout.py add <name> [linkedin_url]")
             sys.exit(1)
         name = sys.argv[2]
         linkedin_url = sys.argv[3] if len(sys.argv) > 3 else None
@@ -2264,7 +2276,7 @@ def main():
 
     elif action == 'dismiss':
         if len(sys.argv) < 3:
-            print("Usage: scout.py dismiss <id>")
+            log.error("Usage: scout.py dismiss <id>")
             sys.exit(1)
         run_dismiss(sys.argv[2])
 
@@ -2273,13 +2285,13 @@ def main():
 
     elif action == 'approach':
         if len(sys.argv) < 3:
-            print("Usage: scout.py approach <name>")
+            log.error("Usage: scout.py approach <name>")
             sys.exit(1)
         run_approach(' '.join(sys.argv[2:]))
 
     elif action == 'approach-id':
         if len(sys.argv) < 3:
-            print("Usage: scout.py approach-id <id>")
+            log.error("Usage: scout.py approach-id <id>")
             sys.exit(1)
         run_approach_by_id(sys.argv[2])
 
@@ -2308,8 +2320,8 @@ def main():
         run_daily_digest()
 
     else:
-        print(f"Unknown action: {action}")
-        print(__doc__)
+        log.error("Unknown action: %s", action)
+        log.info(__doc__)
         sys.exit(1)
 
 
