@@ -1,5 +1,7 @@
 # GroundUp Toolkit
 
+[![CI](https://github.com/navotvolkgroundup/groundup-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/navotvolkgroundup/groundup-toolkit/actions/workflows/ci.yml)
+
 AI-powered automation platform for venture capital teams -- deal sourcing, meeting management, portfolio monitoring, and content creation via WhatsApp, email, and a web dashboard.
 
 Built on [OpenClaw](https://openclaw.ai) and [Claude](https://anthropic.com). Battle-tested by [GroundUp Ventures](https://groundup.vc).

@@ -18,7 +18,10 @@ ways, formation is likely underway.
 
 import re
 import json
+import logging
 from datetime import datetime, timedelta, timezone
+
+log = logging.getLogger("founder-scout")
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +426,24 @@ def detect_team_formation(conn, watchlist_people):
 # Full scan
 # ---------------------------------------------------------------------------
 
+def _add_to_relationship_graph(person_name, related_company, signal_type, details):
+    """Mirror a social graph signal to the central relationship graph."""
+    try:
+        from lib.relationship_graph import RelationshipGraph
+        graph = RelationshipGraph()
+        graph.add_relationship(
+            person_a={"name": person_name, "role": "founder"},
+            person_b={"name": related_company or "Unknown", "company": related_company,
+                       "role": signal_type},
+            rel_type="linkedin_connection",
+            context=details,
+            source="founder-scout",
+        )
+        graph.close()
+    except Exception as e:
+        log.debug("Could not mirror to relationship graph: %s", e)
+
+
 def scan_social_signals(conn, watchlist_people, brave_search_fn=None):
     """Run social graph analysis. Returns signals.
 
@@ -484,6 +505,12 @@ def scan_social_signals(conn, watchlist_people, brave_search_fn=None):
                         signal.get('details'),
                     ))
                     new_connections.append(signal)
+
+                    # Mirror to central relationship graph
+                    _add_to_relationship_graph(
+                        person_name, signal.get('related_company'),
+                        signal.get('signal_type'), signal.get('details'),
+                    )
 
     # Phase 2: Brave Search for co-appearances
     if brave_search_fn and len(watchlist_people) >= 2:

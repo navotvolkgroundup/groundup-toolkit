@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from lib.config import config
 from lib.claude import call_claude
+from lib.models import MODEL_HAIKU, MODEL_SONNET
 from lib.brave import brave_search
 from lib.whatsapp import send_whatsapp
 from lib.email import send_email
@@ -225,7 +226,7 @@ SAMPLES:
 {formatted}"""
 
     try:
-        result = call_claude(prompt, model="claude-haiku-4-5-20251001", max_tokens=500)
+        result = call_claude(prompt, model=MODEL_HAIKU, max_tokens=500)
         # Strip markdown code fences if present
         result = result.strip()
         if result.startswith('```'):
@@ -526,7 +527,7 @@ REQUEST: "{message}"
 Reply with ONLY the queries, one per line. No numbering, no explanations."""
 
     try:
-        result = call_claude(prompt, model="claude-haiku-4-5-20251001", max_tokens=100)
+        result = call_claude(prompt, model=MODEL_HAIKU, max_tokens=100)
         queries = [q.strip() for q in result.strip().split('\n') if q.strip()]
         return queries[:2]
     except Exception:
@@ -591,7 +592,7 @@ Types:
 Reply with ONLY the type name, nothing else."""
 
     try:
-        result = call_claude(prompt, model="claude-haiku-4-5-20251001", max_tokens=20)
+        result = call_claude(prompt, model=MODEL_HAIKU, max_tokens=20)
         result = result.strip().lower().replace('"', '').replace("'", "")
         if result in CONTENT_TYPES:
             return result
@@ -760,7 +761,7 @@ RULES:
 def humanize_content(content):
     """Run content through the humanizer to remove AI writing patterns."""
     prompt = f"Humanize this content:\n\n{content}"
-    result = call_claude(prompt, system_prompt=HUMANIZER_PROMPT, model="claude-sonnet-4-20250514", max_tokens=4096)
+    result = call_claude(prompt, system_prompt=HUMANIZER_PROMPT, model=MODEL_SONNET, max_tokens=4096)
     print("  Humanizer pass complete")
     return result
 

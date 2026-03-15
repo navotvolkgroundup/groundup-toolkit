@@ -1,9 +1,33 @@
 import { useQuery } from "@tanstack/react-query"
+import type { FreshnessMeta } from "@/lib/withFreshness"
+
+export type { FreshnessMeta }
+
+export interface WithMeta<T> {
+  data: T
+  meta: FreshnessMeta
+}
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Failed to fetch ${url}`)
   return res.json()
+}
+
+/** Fetch and unwrap a freshness envelope. Returns {data, meta}. */
+async function fetchWithMeta<T>(url: string): Promise<WithMeta<T>> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Failed to fetch ${url}`)
+  const json = await res.json()
+  // Handle both envelope format {data, meta} and legacy format
+  if (json && typeof json === "object" && "meta" in json && "data" in json) {
+    return json as WithMeta<T>
+  }
+  // Legacy: wrap with synthetic meta
+  return {
+    data: json as T,
+    meta: { fetchedAt: new Date().toISOString(), dataAge: 0, source: "unknown", stale: false, cacheHit: false },
+  }
 }
 
 function fetchJsonDelayed<T>(url: string, delayMs: number): () => Promise<T> {
@@ -27,7 +51,7 @@ export function usePipeline() {
 export function useStats() {
   return useQuery({
     queryKey: ["stats"],
-    queryFn: () => fetchJson<{
+    queryFn: () => fetchWithMeta<{
       dealsThisWeek: number
       dealsThisMonth: number
       decksAnalyzed: number
@@ -68,7 +92,7 @@ export function useTeamActivity() {
 export function useSignals() {
   return useQuery({
     queryKey: ["signals"],
-    queryFn: () => fetchJson<{
+    queryFn: () => fetchWithMeta<{
       signals: Array<{
         id: string
         name: string
@@ -80,6 +104,12 @@ export function useSignals() {
         linkedinUrl: string | null
         githubUrl: string | null
         approached: boolean
+        outcome: string | null
+        compositeScore: number | null
+        classification: string | null
+        thesisMatch: string | null
+        introPath: string | null
+        scoreTrend: number[]
       }>
     }>("/api/signals"),
     refetchInterval: 120_000,
@@ -178,6 +208,25 @@ export function useLeads() {
   })
 }
 
+export function useDealTimeline(company: string | null) {
+  return useQuery({
+    queryKey: ["deal-timeline", company],
+    queryFn: () => fetchJson<{
+      company: string
+      companyId: string | null
+      events: Array<{
+        type: "note" | "deal_created" | "signal" | "email"
+        date: string
+        summary: string
+        source: string
+      }>
+    }>(`/api/deal-timeline?company=${encodeURIComponent(company || "")}`),
+    enabled: !!company,
+    refetchInterval: 300_000,
+    staleTime: 120_000,
+  })
+}
+
 export function useServiceHealth() {
   return useQuery({
     queryKey: ["service-health"],
@@ -194,5 +243,86 @@ export function useServiceHealth() {
     }>("/api/service-health"),
     refetchInterval: 60_000,
     staleTime: 30_000,
+  })
+}
+
+export interface RelConnection {
+  person: {
+    name: string
+    email: string | null
+    company: string | null
+    role: string | null
+  }
+  rel_type: string
+  context: string | null
+  source: string | null
+  strength: number
+  first_seen: string
+  last_seen: string
+}
+
+export interface RelIntroStep {
+  person: { name: string; email: string | null; company: string | null }
+  via_rel_type: string | null
+  via_context: string | null
+}
+
+export function useRelationships(person: string | null) {
+  return useQuery({
+    queryKey: ["relationships", person],
+    queryFn: () => fetchJson<{
+      connections: RelConnection[]
+    }>(`/api/relationships?person=${encodeURIComponent(person || "")}`),
+    enabled: !!person,
+    staleTime: 120_000,
+  })
+}
+
+export function useIntroPath(from: string | null, to: string | null) {
+  return useQuery({
+    queryKey: ["intro-path", from, to],
+    queryFn: () => fetchJson<{
+      path: RelIntroStep[]
+    }>(`/api/relationships?action=intro-path&from=${encodeURIComponent(from || "")}&to=${encodeURIComponent(to || "")}`),
+    enabled: !!from && !!to,
+    staleTime: 120_000,
+  })
+}
+
+export interface ScoringDimension {
+  current_weight: number
+  suggested_weight: number
+  effectiveness: number
+  mean_positive: number
+  mean_negative: number
+}
+
+export interface ScoringInsightsData {
+  dimensions: Record<string, ScoringDimension>
+  precision_by_tier: Record<string, { total: number; positive: number; precision: number }>
+  total_outcomes: number
+  sufficient_data: boolean
+  current_weights: Record<string, number>
+}
+
+export function useScoringInsights() {
+  return useQuery({
+    queryKey: ["scoring-insights"],
+    queryFn: () => fetchWithMeta<ScoringInsightsData>("/api/scoring-insights"),
+    refetchInterval: 300_000,
+    staleTime: 120_000,
+  })
+}
+
+export function useRelationshipStats() {
+  return useQuery({
+    queryKey: ["relationship-stats"],
+    queryFn: () => fetchJson<{
+      people: number
+      relationships: number
+      by_type: Record<string, number>
+    }>("/api/relationships?action=stats"),
+    refetchInterval: 300_000,
+    staleTime: 120_000,
   })
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Meeting Auto-Join - Checks calendar and auto-joins upcoming meetings
-Runs via cron every 3 minutes.
+Runs via cron every minute.
 
-Checks the assistant's calendar for meetings starting in the next 5 minutes.
+Checks the assistant's calendar for meetings starting in the next 3 minutes.
 If a meeting has a Google Meet link and the assistant is invited, joins it
 using Camofox browser automation. Passes event metadata so the join script
 can monitor attendance.
@@ -85,8 +85,8 @@ def get_upcoming_meetings():
     time_min = now.replace(hour=0, minute=0, second=0).strftime('%Y-%m-%dT%H:%M:%SZ')
     time_max = now.replace(hour=23, minute=59, second=59).strftime('%Y-%m-%dT%H:%M:%SZ')
     events = gws_calendar_events(calendar_id, time_min, time_max)
-    window_start = now - timedelta(minutes=2)
-    window_end = now + timedelta(minutes=10)
+    window_start = now - timedelta(minutes=1)
+    window_end = now + timedelta(minutes=3)
 
     upcoming = []
     for event in events:
@@ -146,19 +146,23 @@ def is_already_joined(event_id):
 def write_meeting_metadata(event, meet_url):
     """Write event metadata to a temp file for the join script"""
     event_id = event.get("id", "unknown")
-    attendees = []
+    team_attendees = []
+    all_attendees = []
     for att in event.get("attendees", []):
         email = att.get("email", "")
+        name = att.get("displayName") or att.get("name") or email.split("@")[0].capitalize()
+        entry = {"email": email, "name": name}
+        all_attendees.append(entry)
         if email.endswith("@" + config.team_domain):
-            name = email.split("@")[0].capitalize()
-            attendees.append({"email": email, "name": name})
+            team_attendees.append(entry)
 
     meta = {
         "eventId": event_id,
         "title": event.get("summary", "Untitled"),
         "startTime": event.get("start", {}).get("dateTime", ""),
         "meetUrl": meet_url,
-        "attendees": attendees,
+        "attendees": team_attendees,
+        "allAttendees": all_attendees,
     }
 
     meta_dir = os.path.join(_DATA_DIR, "meeting-meta")

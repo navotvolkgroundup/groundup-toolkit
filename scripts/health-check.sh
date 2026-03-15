@@ -264,6 +264,23 @@ done
 log "  Log sizes OK"
 
 # ----------------------------------------
+# 7. API key age check
+# ----------------------------------------
+log "[7/7] API key age check..."
+ENV_FILE="$HOME/.env"
+if [ -f "$ENV_FILE" ]; then
+    ENV_AGE_DAYS=$(( ($(date +%s) - $(stat -c %Y "$ENV_FILE" 2>/dev/null || stat -f %m "$ENV_FILE" 2>/dev/null || echo "0")) / 86400 ))
+    if [ "$ENV_AGE_DAYS" -ge 90 ]; then
+        warn ".env file unchanged for ${ENV_AGE_DAYS} days — consider rotating API keys"
+        send_alert "WARN: API keys may be stale" ".env file on $(hostname) has not been modified in ${ENV_AGE_DAYS} days. Consider rotating API keys using: scripts/rotate-api-key.sh" "key-age"
+    else
+        log "  .env age: ${ENV_AGE_DAYS} days (OK)"
+    fi
+else
+    log "  No .env file found (skipping key age check)"
+fi
+
+# ----------------------------------------
 # Summary
 # ----------------------------------------
 if [ "$FAILURES" -eq 0 ] && [ "$WARNINGS" -eq 0 ]; then

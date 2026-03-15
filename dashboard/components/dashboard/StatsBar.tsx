@@ -3,9 +3,12 @@
 import { motion } from "framer-motion"
 import { Briefcase, FileSearch, Video, Mail, Radar, TrendingUp } from "lucide-react"
 import { useStats } from "@/lib/hooks/useDashboardData"
+import { FreshnessBadge } from "@/components/ui/FreshnessBadge"
 
 export function StatsBar() {
-  const { data, isLoading } = useStats()
+  const { data: envelope, isLoading } = useStats()
+  const data = envelope?.data
+  const meta = envelope?.meta
 
   const heroStats = [
     {
@@ -57,6 +60,7 @@ export function StatsBar() {
 
   return (
     <div className="mb-8 space-y-3">
+      {meta && <div className="flex justify-end"><FreshnessBadge meta={meta} /></div>}
       {/* Hero metrics */}
       <div className="grid gap-3 grid-cols-2">
         {heroStats.map((stat, i) => (

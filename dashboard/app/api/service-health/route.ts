@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
+import { withFreshness } from "@/lib/withFreshness"
 import { SERVICE_LOG_PATHS } from "@/lib/constants"
 import { execSync } from "child_process"
 import { statSync } from "fs"
@@ -133,5 +134,5 @@ export async function GET(req: NextRequest) {
     healthData[serviceId] = getServiceHealth(serviceId)
   }
 
-  return NextResponse.json({ services: healthData })
+  return NextResponse.json(withFreshness({ services: healthData }, Date.now(), "log_file", 300))
 }

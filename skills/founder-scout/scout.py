@@ -240,7 +240,9 @@ class ScoutDatabase:
 
     def _conn(self):
         """Return a connection as a context manager for safe cleanup."""
-        return contextlib.closing(sqlite3.connect(self.db_path))
+        conn = sqlite3.connect(self.db_path)
+        conn.execute('PRAGMA journal_mode=WAL')
+        return contextlib.closing(conn)
 
     def _init_db(self):
         with self._conn() as conn:
@@ -308,6 +310,11 @@ class ScoutDatabase:
                 c.execute('ALTER TABLE tracked_people ADD COLUMN composite_score INTEGER DEFAULT 0')
             if 'score_classification' not in cols:
                 c.execute('ALTER TABLE tracked_people ADD COLUMN score_classification TEXT DEFAULT "WATCHING"')
+            # v3: outcome tracking for feedback loop
+            if 'outcome' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN outcome TEXT')
+            if 'outcome_at' not in cols:
+                c.execute('ALTER TABLE tracked_people ADD COLUMN outcome_at TEXT')
             conn.commit()
 
             # Initialize v2 module tables
@@ -367,6 +374,54 @@ class ScoutDatabase:
                 'SELECT id FROM tracked_people WHERE linkedin_url = ?', (url,)
             ).fetchone()
         return result[0] if result else None
+
+    def mark_outcome(self, person_id, outcome):
+        """Record a GP outcome for a tracked person.
+
+        Args:
+            person_id: ID in tracked_people table.
+            outcome: One of 'met', 'invested', 'passed', 'noise'.
+        """
+        valid = ('met', 'invested', 'passed', 'noise')
+        if outcome not in valid:
+            raise ValueError(f"outcome must be one of {valid}, got '{outcome}'")
+        with self._conn() as conn:
+            conn.execute(
+                'UPDATE tracked_people SET outcome = ?, outcome_at = ? WHERE id = ?',
+                (outcome, datetime.now().isoformat(), person_id)
+            )
+            conn.commit()
+        log.info("Marked person %s outcome: %s", person_id, outcome)
+
+    def get_outcome_stats(self):
+        """Get precision stats per score classification tier.
+
+        Returns:
+            dict: {classification: {total, met, invested, passed, noise, precision}}
+            where precision = (met + invested) / total for people with outcomes.
+        """
+        with self._conn() as conn:
+            rows = conn.execute('''
+                SELECT score_classification, outcome, COUNT(*) as cnt
+                FROM tracked_people
+                WHERE outcome IS NOT NULL
+                GROUP BY score_classification, outcome
+            ''').fetchall()
+
+        stats = {}
+        for classification, outcome, count in rows:
+            if classification not in stats:
+                stats[classification] = {'total': 0, 'met': 0, 'invested': 0, 'passed': 0, 'noise': 0}
+            stats[classification]['total'] += count
+            if outcome in stats[classification]:
+                stats[classification][outcome] += count
+
+        for tier_stats in stats.values():
+            total = tier_stats['total']
+            positive = tier_stats['met'] + tier_stats['invested']
+            tier_stats['precision'] = round(positive / total, 2) if total > 0 else 0.0
+
+        return stats
 
     def get_active_people(self):
         with self._conn() as conn:
@@ -1281,6 +1336,64 @@ def main():
     elif action == 'digest':
         db = ScoutDatabase(DB_PATH)
         run_daily_digest(db, SCOUT_RECIPIENTS)
+
+    elif action == 'outcome':
+        if len(sys.argv) < 4:
+            log.error("Usage: scout.py outcome <person_id> <met|invested|passed|noise>")
+            sys.exit(1)
+        db = ScoutDatabase(DB_PATH)
+        person_id = int(sys.argv[2])
+        outcome = sys.argv[3]
+        db.mark_outcome(person_id, outcome)
+        print(f"Marked person {person_id} as '{outcome}'")
+
+    elif action == 'outcome-stats':
+        db = ScoutDatabase(DB_PATH)
+        stats = db.get_outcome_stats()
+        if not stats:
+            print("No outcomes recorded yet.")
+        else:
+            print(f"{'Tier':<12} {'Total':<8} {'Met':<6} {'Invested':<10} {'Passed':<8} {'Noise':<7} {'Precision'}")
+            print("-" * 65)
+            for tier in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'WATCHING'):
+                if tier in stats:
+                    s = stats[tier]
+                    print(f"{tier:<12} {s['total']:<8} {s['met']:<6} {s['invested']:<10} {s['passed']:<8} {s['noise']:<7} {s['precision']:.0%}")
+
+    elif action == 'calibrate':
+        from modules.scoring import get_calibration_report, DIMENSIONS
+        db = ScoutDatabase(DB_PATH)
+        report = get_calibration_report(db.conn)
+
+        if '--json' in sys.argv:
+            print(json.dumps(report, indent=2))
+        else:
+            print("=== Conviction Engine Calibration Report ===\n")
+            print(f"Total outcomes: {report['total_outcomes']}")
+            print(f"Sufficient data (>= 20): {'Yes' if report['sufficient_data'] else 'No'}\n")
+
+            print(f"{'Dimension':<12} {'Current':<10} {'Suggested':<12} {'Effectiveness':<15} {'Pos Mean':<10} {'Neg Mean'}")
+            print("-" * 72)
+            for dim in DIMENSIONS:
+                d = report['dimensions'][dim]
+                print(f"{dim:<12} {d['current_weight']:<10.3f} {d['suggested_weight']:<12.3f} {d['effectiveness']:<15.3f} {d['mean_positive']:<10.1f} {d['mean_negative']:.1f}")
+
+            if report['precision_by_tier']:
+                print(f"\n{'Tier':<12} {'Total':<8} {'Positive':<10} {'Precision'}")
+                print("-" * 42)
+                for tier in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'WATCHING'):
+                    if tier in report['precision_by_tier']:
+                        p = report['precision_by_tier'][tier]
+                        print(f"{tier:<12} {p['total']:<8} {p['positive']:<10} {p['precision']:.0%}")
+
+            if report['sufficient_data'] and '--apply' in sys.argv:
+                from modules.scoring import WEIGHTS
+                for dim in DIMENSIONS:
+                    WEIGHTS[dim] = report['dimensions'][dim]['suggested_weight']
+                print(f"\nWeights updated: {WEIGHTS}")
+                log.info("Calibrated weights applied: %s", WEIGHTS)
+            elif report['sufficient_data']:
+                print("\nRun with --apply to update weights.")
 
     else:
         log.error("Unknown action: %s", action)

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { hubspotPost, hubspotGet, hubspotBatchRead, hubspotGetAssociations } from "@/lib/hubspot"
+import { withFreshness } from "@/lib/withFreshness"
 import { readFileSync } from "fs"
 import { join } from "path"
 
@@ -54,6 +55,26 @@ function parseList(body: string, section: string): string[] {
 function parseDate(ts: string | undefined): string | null {
   if (!ts) return null
   return new Date(Number(ts)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+}
+
+interface StructuredMetrics {
+  arr?: string
+  mrr?: string
+  runway?: string
+  headcount?: string | number
+  health?: "GREEN" | "YELLOW" | "RED"
+  as_of?: string
+  mom_growth?: string
+}
+
+function parseStructuredData(body: string): StructuredMetrics | null {
+  const match = body.match(/SOI_JSON:(\{[^\n]+\})/)
+  if (!match) return null
+  try {
+    return JSON.parse(match[1]) as StructuredMetrics
+  } catch {
+    return null
+  }
 }
 
 function parseDateFromBody(body: string, ts: string | undefined): string | null {
@@ -161,27 +182,33 @@ async function fetchPortfolioData() {
 
     if (noteData) {
       const body = noteData.body
+      // Prefer structured SOI_JSON data over regex parsing
+      const structured = parseStructuredData(body)
+
       return {
         name: co.name,
         domain: co.domain,
         fund: co.fund,
         companyId: matchedCid,
-        health: parseHealth(body),
+        health: structured?.health ?? parseHealth(body),
         lastUpdate: parseDateFromBody(noteData.body, noteData.ts),
+        lastUpdateTs: noteData.ts ? Number(noteData.ts) : null,
         summary: parseMetric(body, "Summary"),
         metrics: {
-          arr: parseMetric(body, "ARR"),
-          mrr: parseMetric(body, "MRR"),
-          runway: parseMetric(body, "Runway"),
-          headcount: parseMetric(body, "Headcount"),
-          momGrowth: parseMetric(body, "MoM Growth"),
+          arr: structured?.arr ?? parseMetric(body, "ARR"),
+          mrr: structured?.mrr ?? parseMetric(body, "MRR"),
+          runway: structured?.runway ?? parseMetric(body, "Runway"),
+          headcount: structured?.headcount?.toString() ?? parseMetric(body, "Headcount"),
+          momGrowth: structured?.mom_growth ?? parseMetric(body, "MoM Growth"),
         },
+        metricsSource: structured ? "structured" : "regex",
         revenueMetric: (() => {
+          if (structured?.arr) return structured.arr
+          if (structured?.mrr) return structured.mrr
           const arr = parseMetric(body, "ARR")
           if (arr) return arr
           const mrr = parseMetric(body, "MRR")
           if (mrr) return mrr
-          // Fallback: find first dollar amount in the summary line
           const summaryLine = body.split("\n").find(l => /^Summary:/i.test(l)) ?? ""
           const m = summaryLine.match(/\$[\d,.]+[KMBkmb]?(?:\s*(?:ARR|MRR|revenue|ARR\/yr))?/)
           return m ? m[0] : null
@@ -232,13 +259,13 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   if (_cache && Date.now() - _cache.ts < CACHE_TTL_MS) {
-    return NextResponse.json(_cache.data)
+    return NextResponse.json(withFreshness(_cache.data, _cache.ts, "hubspot", 1800, true))
   }
 
   try {
     const data = await fetchPortfolioData()
     _cache = { data, ts: Date.now() }
-    return NextResponse.json(data)
+    return NextResponse.json(withFreshness(data, Date.now(), "hubspot", 1800))
   } catch (e) {
     console.error("Portfolio API error:", e)
     if (_cache) return NextResponse.json(_cache.data)

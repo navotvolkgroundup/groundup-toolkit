@@ -13,12 +13,13 @@ import time
 import requests
 
 from lib.config import config
+from lib.models import MODEL_SONNET, DEFAULT_MAX_TOKENS, ANTHROPIC_API_VERSION, ANTHROPIC_API_URL
 
 ANTHROPIC_API_KEY = config.anthropic_api_key
 
 
-def call_claude(prompt, system_prompt="", model="claude-sonnet-4-20250514",
-                max_tokens=4096, timeout=120, max_retries=5):
+def call_claude(prompt, system_prompt="", model=MODEL_SONNET,
+                max_tokens=DEFAULT_MAX_TOKENS, timeout=120, max_retries=5):
     """Call Claude API with retry logic for rate limits and overload.
 
     Args:
@@ -42,14 +43,14 @@ def call_claude(prompt, system_prompt="", model="claude-sonnet-4-20250514",
 
     headers = {
         "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
+        "anthropic-version": ANTHROPIC_API_VERSION,
         "content-type": "application/json"
     }
 
     for attempt in range(max_retries):
         try:
             response = requests.post(
-                "https://api.anthropic.com/v1/messages",
+                ANTHROPIC_API_URL,
                 headers=headers,
                 json=payload,
                 timeout=timeout

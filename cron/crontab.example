@@ -25,8 +25,8 @@ MAILTO=""
 # Meeting bot - process recordings every 2 hours
 0 */2 * * * $TOOLKIT_ROOT/scripts/load-env.sh meeting-bot -- $TOOLKIT_ROOT/skills/meeting-bot/meeting-bot >> /var/log/meeting-bot.log 2>&1
 
-# Meeting auto-join - every 3 minutes
-*/3 * * * * $TOOLKIT_ROOT/scripts/load-env.sh meeting-bot -- $TOOLKIT_ROOT/skills/meeting-bot/meeting-auto-join >> /var/log/meeting-auto-join.log 2>&1
+# Meeting auto-join - every minute
+*/1 * * * * $TOOLKIT_ROOT/scripts/load-env.sh meeting-bot -- $TOOLKIT_ROOT/skills/meeting-bot/meeting-auto-join >> /var/log/meeting-auto-join.log 2>&1
 
 # Email-to-deal automation - every 10 minutes
 # Scans inbox for pitch decks / deal emails and creates HubSpot deals
@@ -52,6 +52,16 @@ MAILTO=""
 
 # Keep on Radar - check replies every 2 hours
 0 */2 * * * $TOOLKIT_ROOT/scripts/load-env.sh keep-on-radar -- $TOOLKIT_ROOT/.venv/bin/python3 $TOOLKIT_ROOT/skills/keep-on-radar/radar.py check-replies >> /var/log/keep-on-radar.log 2>&1
+
+# Portfolio deep scan - weekly on Mondays at 8:00 AM UTC
+0 8 * * 1 $TOOLKIT_ROOT/scripts/load-env.sh portfolio-deep-scan -- $TOOLKIT_ROOT/.venv/bin/python3 $TOOLKIT_ROOT/scripts/portfolio_monitor.py deep-scan >> /var/log/portfolio-monitor.log 2>&1
+
+# Cron watchdog - every 30 minutes
+# Alerts via WhatsApp if any scheduled job stops running
+*/30 * * * * $TOOLKIT_ROOT/scripts/load-env.sh cron-watchdog -- $TOOLKIT_ROOT/.venv/bin/python3 $TOOLKIT_ROOT/scripts/cron-watchdog.py check >> /var/log/cron-watchdog.log 2>&1
+
+# SQLite backup - daily at 3:00 AM UTC (before maintenance)
+0 3 * * * $TOOLKIT_ROOT/scripts/backup-db.sh >> /var/log/daily-maintenance.log 2>&1
 
 # Daily maintenance - system updates at 4:00 AM UTC
 0 4 * * * $TOOLKIT_ROOT/scripts/daily-maintenance.sh >> /var/log/daily-maintenance.log 2>&1

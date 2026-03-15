@@ -10,6 +10,7 @@ from lib.config import config
 from lib.gws import gws_drive_search, gws_drive_download, gws_gmail_send
 from lib.claude import call_claude
 from lib.whatsapp import send_whatsapp
+from lib.relationship_graph import RelationshipGraph
 
 _ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
 _DATA = os.path.join(_ROOT, 'data')
@@ -123,6 +124,35 @@ def send_summary(summary, title, attendees):
             log(f"Failed to send to {email}")
     return sent
 
+def _capture_meeting_relationships(attendees, meeting_title):
+    """Record relationships between all meeting attendees."""
+    if not attendees or len(attendees) < 2:
+        return
+    try:
+        graph = RelationshipGraph()
+        team_domain = config.team_domain if hasattr(config, 'team_domain') else ''
+        for i, att_a in enumerate(attendees):
+            for att_b in attendees[i + 1:]:
+                email_a = att_a.get('email', '')
+                email_b = att_b.get('email', '')
+                if not email_a or not email_b:
+                    continue
+                role_a = 'team' if email_a.endswith('@' + team_domain) else 'external'
+                role_b = 'team' if email_b.endswith('@' + team_domain) else 'external'
+                graph.add_relationship(
+                    person_a={"name": att_a.get('name', email_a.split('@')[0]),
+                               "email": email_a, "role": role_a},
+                    person_b={"name": att_b.get('name', email_b.split('@')[0]),
+                               "email": email_b, "role": role_b},
+                    rel_type="meeting",
+                    context=meeting_title,
+                    source="calendar",
+                )
+        graph.close()
+    except Exception as e:
+        log(f"Could not capture meeting relationships: {e}")
+
+
 def process_meeting(event_id, entry):
     """Process a single ended meeting: find transcript, analyze, email."""
     title = entry.get('title', 'Unknown Meeting')
@@ -165,12 +195,18 @@ def process_meeting(event_id, entry):
     # Load attendees from meeting metadata
     meta_path = os.path.join(META_DIR, f"meeting-meta-{event_id}.json")
     attendees = []
+    all_attendees = []
     if os.path.exists(meta_path):
         try:
             with open(meta_path) as f:
-                attendees = json.load(f).get('attendees', [])
+                meta = json.load(f)
+                attendees = meta.get('attendees', [])
+                all_attendees = meta.get('allAttendees', attendees)
         except Exception:
             pass
+
+    # Capture relationships between all meeting attendees
+    _capture_meeting_relationships(all_attendees, title)
 
     send_summary(summary, title, attendees)
 

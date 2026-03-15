@@ -77,6 +77,73 @@ def format_scan_whatsapp(recipient_name, profiles):
     return '\n'.join(lines)
 
 
+def _enrich_signal(signal):
+    """Add intro path and thesis fit context to a signal dict (best-effort)."""
+    enrichment = {}
+
+    # Intro path from relationship graph
+    try:
+        from lib.relationship_graph import RelationshipGraph
+        graph = RelationshipGraph()
+        identifier = signal.get('linkedin_url') or signal.get('name')
+        if identifier:
+            connections = graph.get_connections(identifier, limit=3)
+            if connections:
+                parts = []
+                for c in connections[:2]:
+                    p = c.get('person', {})
+                    name = p.get('name', 'Unknown')
+                    rel = c.get('rel_type', '').replace('_', ' ')
+                    strength = c.get('strength', 1)
+                    parts.append(f"{name} ({rel}, ×{strength})")
+                enrichment['intro'] = "Connected via: " + ", ".join(parts)
+    except Exception:
+        pass
+
+    # Thesis fit
+    try:
+        import os
+        toolkit_root = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..', '..'))
+        thesis_path = os.path.join(toolkit_root, 'skills', 'founder-scout', 'thesis.yaml')
+        if os.path.exists(thesis_path):
+            try:
+                import yaml
+                with open(thesis_path, 'r') as f:
+                    thesis_config = yaml.safe_load(f)
+            except ImportError:
+                thesis_config = None
+
+            if thesis_config:
+                from modules.scoring import apply_thesis_matching
+                profile_text = f"{signal.get('headline', '')} {signal.get('description', '')}"
+                _, match = apply_thesis_matching(50, profile_text, thesis_config)
+                if match and not match.startswith('Anti'):
+                    enrichment['thesis'] = match
+    except Exception:
+        pass
+
+    return enrichment
+
+
+def _format_enriched_signal(i, s, include_enrichment=True):
+    """Format a single signal entry with optional enrichment."""
+    lines = []
+    lines.append(f"{i}. {s['name']}")
+    if s.get('linkedin_url'):
+        lines.append(f"   LinkedIn: {s['linkedin_url']}")
+    lines.append(f"   Signal: {s.get('description', 'N/A')}")
+
+    if include_enrichment:
+        enrichment = _enrich_signal(s)
+        if enrichment.get('intro'):
+            lines.append(f"   {enrichment['intro']}")
+        if enrichment.get('thesis'):
+            lines.append(f"   Thesis fit: {enrichment['thesis']}")
+
+    lines.append("")
+    return lines
+
+
 def format_briefing_email(recipient_name, high_signals, medium_signals, stats):
     """Format weekly briefing email for watchlist signals."""
     now = datetime.now()
@@ -94,21 +161,13 @@ def format_briefing_email(recipient_name, high_signals, medium_signals, stats):
         lines.append("HIGH SIGNAL")
         lines.append("-" * 40)
         for i, s in enumerate(high_signals, 1):
-            lines.append(f"{i}. {s['name']}")
-            if s.get('linkedin_url'):
-                lines.append(f"   LinkedIn: {s['linkedin_url']}")
-            lines.append(f"   Signal: {s.get('description', 'N/A')}")
-            lines.append("")
+            lines.extend(_format_enriched_signal(i, s))
 
     if medium_signals:
         lines.append("MEDIUM SIGNAL")
         lines.append("-" * 40)
         for i, s in enumerate(medium_signals, 1):
-            lines.append(f"{i}. {s['name']}")
-            if s.get('linkedin_url'):
-                lines.append(f"   LinkedIn: {s['linkedin_url']}")
-            lines.append(f"   Signal: {s.get('description', 'N/A')}")
-            lines.append("")
+            lines.extend(_format_enriched_signal(i, s))
 
     if not high_signals and not medium_signals:
         lines.append("No new signals on watchlist this week.")

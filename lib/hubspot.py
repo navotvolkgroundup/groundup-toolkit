@@ -313,7 +313,8 @@ def get_company_for_deal(deal_id):
         if response.status_code == 200:
             return response.json()
         return None
-    except Exception:
+    except Exception as e:
+        print(f"  Error getting company for deal {deal_id}: {e}", file=sys.stderr)
         return None
 
 

@@ -1,0 +1,85 @@
+# Investment thesis configuration for Founder Scout scoring.
+#
+# thesis_areas: keywords that boost a founder's score when matched (2+ required).
+# anti_thesis: keywords that reduce score for out-of-scope sectors.
+#
+# Modify this file to align with GroundUp's current investment focus.
+
+thesis_areas:
+  - name: "AI Infrastructure"
+    keywords:
+      - "infrastructure"
+      - "MLOps"
+      - "model serving"
+      - "training"
+      - "GPU"
+      - "inference"
+      - "LLM"
+      - "foundation model"
+      - "vector database"
+    weight_boost: 1.2
+
+  - name: "Developer Tools"
+    keywords:
+      - "developer"
+      - "devtools"
+      - "API"
+      - "SDK"
+      - "platform"
+      - "open source"
+      - "observability"
+      - "CI/CD"
+    weight_boost: 1.15
+
+  - name: "Cybersecurity"
+    keywords:
+      - "security"
+      - "cyber"
+      - "threat detection"
+      - "zero trust"
+      - "SIEM"
+      - "identity"
+      - "encryption"
+      - "vulnerability"
+    weight_boost: 1.1
+
+  - name: "Data Infrastructure"
+    keywords:
+      - "data pipeline"
+      - "data engineering"
+      - "ETL"
+      - "data lake"
+      - "streaming"
+      - "real-time analytics"
+      - "data mesh"
+    weight_boost: 1.1
+
+  - name: "Defense Tech"
+    keywords:
+      - "defense"
+      - "military"
+      - "intelligence"
+      - "autonomous"
+      - "drone"
+      - "ISR"
+      - "command and control"
+    weight_boost: 1.15
+
+anti_thesis:
+  - keywords:
+      - "consumer"
+      - "social media"
+      - "gaming"
+      - "e-commerce"
+      - "marketplace"
+      - "D2C"
+    weight_penalty: 0.7
+
+  - keywords:
+      - "real estate"
+      - "proptech"
+      - "crypto"
+      - "NFT"
+      - "DeFi"
+      - "blockchain"
+    weight_penalty: 0.75

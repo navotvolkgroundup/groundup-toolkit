@@ -4,6 +4,7 @@ import sys
 import time
 
 from lib.whatsapp import send_whatsapp
+from lib.models import MODEL_HAIKU
 
 from .deck_extractor import format_deck_data_text
 from .market_researcher import format_research_for_section
@@ -480,7 +481,7 @@ INVESTMENT MEMO:
 
 Write ONLY the paragraph, no label or prefix."""
 
-    section_results['tldr'] = _call_claude_with_retry(tldr_prompt, model="claude-haiku-4-5-20251001", max_tokens=300)
+    section_results['tldr'] = _call_claude_with_retry(tldr_prompt, model=MODEL_HAIKU, max_tokens=300)
     print("    Done: TL;DR")
 
     return section_results

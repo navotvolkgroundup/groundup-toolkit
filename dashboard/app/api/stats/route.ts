@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { getCached, setCache, CACHE_TTL } from "@/lib/cache"
 import { hubspotSearch } from "@/lib/hubspot"
+import { withFreshness } from "@/lib/withFreshness"
 import { execSync } from "child_process"
 
 const limiter = rateLimit({ interval: 60_000, limit: 30 })
@@ -38,7 +39,7 @@ export async function GET(req: NextRequest) {
   try {
     const cacheKey = "stats:dashboard"
     const cached = getCached<Record<string, number>>(cacheKey)
-    if (cached) return NextResponse.json(cached)
+    if (cached) return NextResponse.json(withFreshness(cached, Date.now(), "cache", 300, true))
 
     // Deals this week from HubSpot (VC Deal Flow pipeline only)
     const weekAgo = new Date()
@@ -105,7 +106,7 @@ export async function GET(req: NextRequest) {
 
     setCache(cacheKey, stats, CACHE_TTL)
 
-    return NextResponse.json(stats)
+    return NextResponse.json(withFreshness(stats, Date.now(), "hubspot", 300))
   } catch (e) {
     console.error("Stats API error:", e)
     return NextResponse.json({

@@ -161,8 +161,8 @@ def fetch_recent_registrations(since_date=None):
             break
 
         # Safety cap to avoid runaway pagination
-        if offset >= 10000:
-            logger.warning("Reached pagination cap of 10000 records")
+        if offset >= 50000:
+            logger.warning("Reached pagination cap of 50000 records (total=%d)", total)
             break
 
     return all_records

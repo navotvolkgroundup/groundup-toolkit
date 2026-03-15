@@ -50,11 +50,71 @@ from .extractor import (
 from .crm import (
     create_hubspot_company, create_hubspot_deal, update_deal_owner,
     associate_deal_company, search_hubspot_company, search_hubspot_deal,
+    find_or_create_company,
 )
 
 from .notifications import (
     send_whatsapp, send_confirmation_email, send_email_simple,
 )
+
+from lib.relationship_graph import RelationshipGraph
+
+_rel_graph = None
+
+def _get_rel_graph():
+    """Lazy-init relationship graph (avoids import-time DB creation)."""
+    global _rel_graph
+    if _rel_graph is None:
+        _rel_graph = RelationshipGraph()
+    return _rel_graph
+
+
+def _capture_thread_relationships(thread_data, deal_name, team_member_email):
+    """Extract all email participants from a thread and record relationships.
+
+    Creates edges between the team member and every external participant.
+    """
+    if not thread_data or not thread_data.get('messages'):
+        return
+
+    graph = _get_rel_graph()
+    skip_domains = {'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+                    'googlemail.com', 'icloud.com'}
+    team_domain = config.team_domain if hasattr(config, 'team_domain') else ''
+
+    external_contacts = {}  # email -> name
+
+    for msg in thread_data.get('messages', []):
+        msg_headers = msg.get('payload', {}).get('headers', [])
+        for h in msg_headers:
+            if h['name'].lower() in ('from', 'to', 'cc'):
+                # Extract all email addresses from the header
+                for match in re.finditer(r'(?:"?([^"<]*)"?\s*)?<?([\w.+-]+@[\w.-]+)>?', h['value']):
+                    name_part = (match.group(1) or '').strip().strip('"')
+                    email_addr = match.group(2).lower()
+                    domain = email_addr.split('@')[-1]
+
+                    if domain in skip_domains or domain == team_domain:
+                        continue
+
+                    if email_addr not in external_contacts or (name_part and not external_contacts[email_addr]):
+                        external_contacts[email_addr] = name_part
+
+    try:
+        for email_addr, name in external_contacts.items():
+            person_name = name or email_addr.split('@')[0]
+            company = email_addr.split('@')[-1].split('.')[0].capitalize()
+            graph.add_relationship(
+                person_a={"name": team_member_email.split('@')[0].capitalize(),
+                           "email": team_member_email, "role": "team"},
+                person_b={"name": person_name, "email": email_addr, "company": company,
+                           "role": "founder"},
+                rel_type="email_thread",
+                context=deal_name,
+                source="gmail",
+            )
+    except Exception as e:
+        log.warning('Could not capture thread relationships: %s', e)
 
 
 def process_whatsapp_deal(msg, sender_email, sender_name, phone):
@@ -118,13 +178,11 @@ def process_whatsapp_deal(msg, sender_email, sender_name, phone):
     log.info('Company: %s', company_name)
     log.info('Category: %s', category)
 
-    # Create company and deal
-    company_data = {
-        'name': company_name,
-        'description': f'Created from WhatsApp by {sender_name}'
-    }
-
-    company_id = create_hubspot_company(company_data)
+    # Find existing or create company (with dedup)
+    company_id = find_or_create_company(
+        company_name,
+        description=f'Created from WhatsApp by {sender_name}',
+    )
     if not company_id:
         send_whatsapp(phone, f"\u274c Error creating company '{company_name}'. Please try again or contact your admin.")
         return
@@ -133,6 +191,19 @@ def process_whatsapp_deal(msg, sender_email, sender_name, phone):
     deal_id = create_hubspot_deal(deal_name, company_id, sender_email, pipeline_id, stage_id)
 
     if deal_id:
+        # Capture relationship: team member submitted this deal
+        try:
+            graph = _get_rel_graph()
+            graph.add_relationship(
+                person_a={"name": sender_name, "email": sender_email, "role": "team"},
+                person_b={"name": company_name, "company": company_name, "role": "founder"},
+                rel_type="email_thread",
+                context=company_name,
+                source="whatsapp",
+            )
+        except Exception as e:
+            log.warning('Could not capture WhatsApp deal relationship: %s', e)
+
         deal_url = f'https://app.hubspot.com/contacts/{config.hubspot_portal_id}/record/0-3/{deal_id}'
         pipeline_name = PIPELINE_NAMES.get(pipeline_id, pipeline_id)
         stage_name = STAGE_NAMES.get(stage_id, stage_id)
@@ -252,24 +323,19 @@ def process_roastmydeck_email(thread_id):
 
     company_description = "\n".join(company_desc_parts)
 
-    # Check for existing company
-    existing_company_id = search_hubspot_company(company_name)
-    if existing_company_id:
-        log.info('Found existing company: %s (ID: %s)', company_name, existing_company_id)
-        # Update description with analysis
-        try:
-            url = f"{MATON_BASE_URL}/crm/v3/objects/companies/{existing_company_id}"
-            h = {"Authorization": f"Bearer {MATON_API_KEY}", "Content-Type": "application/json"}
-            requests.patch(url, headers=h, json={"properties": {"description": company_description}})
-            log.info('Updated company description with RoastMyDeck analysis')
-        except Exception:
-            pass
-        company_id = existing_company_id
-    else:
-        company_data = {"name": company_name, "description": company_description}
-        company_id = create_hubspot_company(company_data)
-        if not company_id:
-            return False
+    # Find existing or create company (with dedup)
+    company_id = find_or_create_company(company_name, description=company_description)
+    if not company_id:
+        return False
+
+    # Update description with analysis on existing companies
+    try:
+        url = f"{MATON_BASE_URL}/crm/v3/objects/companies/{company_id}"
+        h = {"Authorization": f"Bearer {MATON_API_KEY}", "Content-Type": "application/json"}
+        requests.patch(url, headers=h, json={"properties": {"description": company_description}}, timeout=10)
+        log.info('Updated company description with RoastMyDeck analysis')
+    except Exception as e:
+        log.warning('Could not update company description: %s', e)
 
     # Build deal description
     deal_desc_parts = [f"RoastMyDeck Analysis \u2014 {recommendation} ({signal})"]
@@ -356,6 +422,23 @@ def process_roastmydeck_email(thread_id):
                 log.info('Created note with full analysis on deal')
             except Exception as e:
                 log.warning('Could not create note: %s', e)
+
+        # Capture founder relationship from RoastMyDeck
+        if founder_email:
+            try:
+                graph = _get_rel_graph()
+                graph.add_relationship(
+                    person_a={"name": owner_email.split('@')[0].capitalize(),
+                               "email": owner_email, "role": "team"},
+                    person_b={"name": founder or founder_email.split('@')[0],
+                               "email": founder_email, "company": company_name,
+                               "role": "founder"},
+                    rel_type="email_thread",
+                    context=f"[RoastMyDeck] {company_name}",
+                    source="gmail",
+                )
+            except Exception as e:
+                log.warning('Could not capture RoastMyDeck relationship: %s', e)
 
         # Send confirmation (to first team member)
         deal_url = f"https://app.hubspot.com/contacts/{config.hubspot_portal_id}/record/0-3/{deal_id}"
@@ -614,29 +697,45 @@ def process_email(thread):
             mark_email_processed(thread_id)
             return False
 
-    # Check for existing company to avoid duplicates
-    existing_company_id = search_hubspot_company(company_data['name'])
-    if existing_company_id:
-        log.info('Found existing company: %s (ID: %s)', company_data["name"], existing_company_id)
-        company_id = existing_company_id
+    # Extract domain from non-team email addresses for dedup
+    company_domain = None
+    for msg in thread_data.get('messages', []):
+        msg_headers = msg.get('payload', {}).get('headers', [])
+        for h in msg_headers:
+            if h['name'].lower() in ('from', 'to', 'cc'):
+                email_match = re.search(r'[\w.+-]+@([\w.-]+)', h['value'])
+                if email_match:
+                    d = email_match.group(1).lower()
+                    # Skip team domain and common providers
+                    skip_domains = {'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+                                    'googlemail.com', 'icloud.com', config.team_domain}
+                    if d not in skip_domains:
+                        company_domain = d
+                        break
+        if company_domain:
+            break
 
-        # Update description if we have new deck analysis
-        if deck_description:
-            try:
-                url = f'{MATON_BASE_URL}/crm/v3/objects/companies/{company_id}'
-                headers = {
-                    'Authorization': f'Bearer {MATON_API_KEY}',
-                    'Content-Type': 'application/json'
-                }
-                payload = {'properties': {'description': company_data['description']}}
-                requests.patch(url, headers=headers, json=payload, timeout=10)
-                log.info('Updated company description with deck analysis')
-            except Exception:
-                pass
-    else:
-        company_id = create_hubspot_company(company_data)
-        if not company_id:
-            return False
+    # Find existing or create company (with dedup)
+    company_id = find_or_create_company(
+        company_data['name'],
+        description=company_data.get('description', ''),
+        domain=company_domain,
+    )
+    if not company_id:
+        return False
+
+    # Update description if we have new deck analysis
+    if deck_description:
+        try:
+            url = f'{MATON_BASE_URL}/crm/v3/objects/companies/{company_id}'
+            h = {
+                'Authorization': f'Bearer {MATON_API_KEY}',
+                'Content-Type': 'application/json'
+            }
+            requests.patch(url, headers=h, json={'properties': {'description': company_data['description']}}, timeout=10)
+            log.info('Updated company description with deck analysis')
+        except Exception as e:
+            log.warning('Could not update company description: %s', e)
 
     deal_name = company_data['name']
 
@@ -655,6 +754,9 @@ def process_email(thread):
     deal_id = create_hubspot_deal(deal_name, company_id, sender_email, pipeline_id, stage_id)
 
     if deal_id:
+        # Capture relationships from email thread participants
+        _capture_thread_relationships(thread_data, deal_name, sender_email)
+
         # Send confirmation email
         deal_url = f'https://app.hubspot.com/contacts/{config.hubspot_portal_id}/record/0-3/{deal_id}'
         pipeline_name = PIPELINE_NAMES.get(pipeline_id, pipeline_id)
@@ -714,3 +816,5 @@ def main():
     log.info('Found %d emails', len(threads))
     processed = sum(1 for thread in threads if process_email(thread))
     log.info('Processed: %d/%d', processed, len(threads))
+    if processed == 0 and len(threads) > 0:
+        log.warning('Processed 0 of %d emails — possible systemic failure', len(threads))

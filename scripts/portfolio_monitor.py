@@ -17,11 +17,17 @@ import re
 import json
 import time
 import base64
+import hashlib
+import logging
+import tempfile
 import requests
 from datetime import datetime
 
+log = logging.getLogger("portfolio-monitor")
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.config import config
+from lib.models import MODEL_HAIKU, ANTHROPIC_API_VERSION, ANTHROPIC_API_URL
 
 MATON_API_KEY = config.maton_api_key
 ANTHROPIC_API_KEY = config.anthropic_api_key
@@ -69,8 +75,8 @@ def _load_portfolio_cache() -> dict:
             cache = json.load(f)
         if time.time() - cache.get("timestamp", 0) < PORTFOLIO_CACHE_TTL:
             return cache.get("domains", {})
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        pass
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        logging.debug('Portfolio cache miss: %s', e)
     return {}
 
 
@@ -146,15 +152,22 @@ def sync_portfolio_from_hubspot() -> dict:
         except Exception as e:
             print(f"    Error processing deal {deal_id}: {e}")
 
-    # Step 3: Write cache
+    # Step 3: Write cache (atomic via temp + rename)
     try:
         cache_data = {"timestamp": time.time(), "domains": domains}
-        os.makedirs(os.path.dirname(PORTFOLIO_CACHE_PATH), exist_ok=True)
-        with open(PORTFOLIO_CACHE_PATH, 'w') as f:
-            json.dump(cache_data, f, indent=2)
+        cache_dir = os.path.dirname(PORTFOLIO_CACHE_PATH)
+        os.makedirs(cache_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(suffix='.json', dir=cache_dir)
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            os.replace(tmp_path, PORTFOLIO_CACHE_PATH)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
         print(f"  Cached {len(domains)} domains to {PORTFOLIO_CACHE_PATH}")
     except Exception as e:
-        print(f"  Warning: could not write cache: {e}")
+        log.warning("Could not write portfolio cache: %s", e)
 
     return domains
 
@@ -184,8 +197,8 @@ def extract_email_body(thread_detail: dict) -> str:
                 decoded = re.sub(r'\s+', ' ', decoded).strip()
                 if decoded:
                     texts.append(decoded)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug('Base64 decode error: %s', e)
 
     def walk_parts(payload):
         mime = payload.get('mimeType', '')
@@ -340,14 +353,14 @@ Return ONLY the JSON object, no other text."""
 
     try:
         resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
+            ANTHROPIC_API_URL,
             headers={
                 "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
+                "anthropic-version": ANTHROPIC_API_VERSION,
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-haiku-4-5-20251001",
+                "model": MODEL_HAIKU,
                 "max_tokens": 1000,
                 "messages": [{"role": "user", "content": prompt}],
             },
@@ -408,6 +421,26 @@ def format_touchpoint_note(source: str, company_name: str, content: str, metrics
         lines += ["Suggested actions:"] + [f"  → {a}" for a in metrics["next_actions"]] + [""]
 
     lines += ["---", f"Source: {source}", "Logged by Christina (AI)"]
+
+    # Append structured JSON block for machine-readable parsing
+    structured = {}
+    if metrics.get("arr"):
+        structured["arr"] = metrics["arr"]
+    if metrics.get("mrr"):
+        structured["mrr"] = metrics["mrr"]
+    if metrics.get("runway_months"):
+        structured["runway"] = f"{metrics['runway_months']}mo"
+    if metrics.get("headcount"):
+        structured["headcount"] = metrics["headcount"]
+    if metrics.get("mom_growth"):
+        structured["mom_growth"] = metrics["mom_growth"]
+    if health and health != "UNKNOWN":
+        structured["health"] = health
+    structured["as_of"] = date_str
+    if structured:
+        import json as _json
+        lines.append(f"\nSOI_JSON:{_json.dumps(structured)}")
+
     return "\n".join(lines)
 
 
@@ -495,8 +528,8 @@ def handle_portfolio_email(original_sender_email: str, subject: str, body: str, 
             dt = parsedate_to_datetime(raw_date)
             original_date_ms = int(dt.timestamp() * 1000)
             original_date_str = dt.strftime("%b %d, %Y")
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug('Could not parse email date "%s": %s', raw_date, e)
 
     # Extract metrics with Claude
     metrics = extract_metrics_with_claude(content, company_name)
@@ -581,10 +614,112 @@ def get_portfolio_summary(company_name: str) -> str:
     return f"Latest updates for {company_name}:\n\n" + "\n\n---\n\n".join(notes[:3])
 
 
+NEWS_SEEN_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'portfolio-news-seen.json')
+
+
+def _load_news_seen():
+    """Load hash set of already-seen news URLs."""
+    try:
+        with open(NEWS_SEEN_PATH, 'r') as f:
+            return set(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def _save_news_seen(seen):
+    """Atomically save the seen-news set."""
+    data_dir = os.path.dirname(NEWS_SEEN_PATH)
+    os.makedirs(data_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(suffix='.json', dir=data_dir)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(list(seen), f)
+        os.replace(tmp_path, NEWS_SEEN_PATH)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def deep_scan_portfolio():
+    """Run a deep news scan for all portfolio companies.
+
+    Searches Brave for funding, acquisition, hiring, and layoff news.
+    Deduplicates against previously seen results.
+    Returns list of new findings.
+    """
+    from lib.brave import brave_search
+
+    seen = _load_news_seen()
+    new_findings = []
+
+    for domain, company_name in PORTFOLIO.items():
+        queries = [
+            f'"{company_name}" funding OR acquisition OR layoff OR hire',
+            f'"{company_name}" Series OR round OR raised',
+        ]
+
+        for query in queries:
+            try:
+                results = brave_search(query, count=5)
+                if not results:
+                    continue
+
+                web_results = results.get("web", {}).get("results", [])
+                for item in web_results:
+                    url = item.get("url", "")
+                    url_hash = hashlib.sha256(url.encode()).hexdigest()[:16]
+                    if url_hash in seen:
+                        continue
+
+                    title = item.get("title", "")
+                    description = item.get("description", "")
+                    seen.add(url_hash)
+
+                    new_findings.append({
+                        "company": company_name,
+                        "domain": domain,
+                        "title": title,
+                        "description": description,
+                        "url": url,
+                    })
+                    print(f"  NEW: [{company_name}] {title[:80]}")
+            except Exception as e:
+                log.warning("Deep scan error for %s: %s", company_name, e)
+
+        # Rate limit: be polite to Brave API
+        time.sleep(1)
+
+    _save_news_seen(seen)
+    print(f"\nDeep scan complete: {len(new_findings)} new finding(s) across {len(PORTFOLIO)} companies")
+
+    # Create HubSpot notes for new findings
+    if new_findings and MATON_API_KEY:
+        from lib.hubspot import search_company, add_note
+        for finding in new_findings:
+            company = search_company(name=finding["company"])
+            if company:
+                note_text = (
+                    f"PORTFOLIO NEWS: {finding['title']}\n\n"
+                    f"{finding['description']}\n\n"
+                    f"Source: {finding['url']}"
+                )
+                add_note(company["id"], note_text, object_type="companies")
+                log.info("Added news note for %s", finding["company"])
+
+    return new_findings
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == 'sync':
         result = sync_portfolio_from_hubspot()
         print(f"Synced {len(result)} portfolio domains from HubSpot")
+    elif len(sys.argv) > 1 and sys.argv[1] == 'deep-scan':
+        findings = deep_scan_portfolio()
+        if findings:
+            print(json.dumps(findings, indent=2))
     else:
         # Test domain lookup
         print("Testing domain lookup:")

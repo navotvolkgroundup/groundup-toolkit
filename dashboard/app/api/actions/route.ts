@@ -5,6 +5,8 @@ import { execSync } from "child_process"
 
 const limiter = rateLimit({ interval: 60_000, limit: 10 })
 
+const TOOLKIT_ROOT = process.env.TOOLKIT_ROOT || "/root/groundup-toolkit"
+
 const ALLOWED_ACTIONS: Record<string, { command: string; description: string }> = {
   "founder-scout-scan": {
     command: ". /root/.env && python3 /root/.openclaw/skills/founder-scout/scout.py scan >> /var/log/founder-scout.log 2>&1 &",
@@ -18,7 +20,14 @@ const ALLOWED_ACTIONS: Record<string, { command: string; description: string }> 
     command: "/root/.openclaw/skills/meeting-reminders/meeting-reminders reminders >> /var/log/meeting-reminders.log 2>&1 &",
     description: "Check upcoming meetings",
   },
+  "thesis-scanner": {
+    command: `. /root/.env && python3 ${process.env.TOOLKIT_ROOT || "/root/groundup-toolkit"}/scripts/thesis_scanner.py >> /var/log/thesis-scanner.log 2>&1 &`,
+    description: "Run thesis market scanner",
+  },
 }
+
+// Actions that take parameters (handled separately)
+const PARAM_ACTIONS = ["move-deal-stage", "mark-approached"] as const
 
 export async function POST(req: NextRequest) {
   const { ok } = await limiter.check(req)
@@ -35,7 +44,64 @@ export async function POST(req: NextRequest) {
   }
 
   const { action } = body
-  if (typeof action !== "string" || !ALLOWED_ACTIONS[action]) {
+  if (typeof action !== "string") {
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 })
+  }
+
+  // Parameterized actions
+  if (action === "move-deal-stage") {
+    const { dealId, stageId } = body as { dealId?: string; stageId?: string }
+    if (!dealId || !stageId) {
+      return NextResponse.json({ error: "dealId and stageId required" }, { status: 400 })
+    }
+    try {
+      const result = execSync(
+        `python3 ${TOOLKIT_ROOT}/scripts/deal_action.py move-stage ${dealId} ${stageId}`,
+        { encoding: "utf-8", timeout: 10000 }
+      )
+      return NextResponse.json({ ok: true, action: "Deal stage updated", result: JSON.parse(result) })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error"
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
+  }
+
+  if (action === "signal-to-deal") {
+    const { personId } = body as { personId?: string }
+    if (!personId) {
+      return NextResponse.json({ error: "personId required" }, { status: 400 })
+    }
+    try {
+      const result = execSync(
+        `python3 ${TOOLKIT_ROOT}/scripts/signal_to_deal.py ${personId} --json`,
+        { encoding: "utf-8", timeout: 15000 }
+      ).trim()
+      return NextResponse.json({ ok: true, action: "Deal created from signal", result: JSON.parse(result) })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error"
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
+  }
+
+  if (action === "mark-approached") {
+    const { personId } = body as { personId?: string }
+    if (!personId) {
+      return NextResponse.json({ error: "personId required" }, { status: 400 })
+    }
+    try {
+      execSync(
+        `python3 ${TOOLKIT_ROOT}/skills/founder-scout/scout.py approach-id ${personId}`,
+        { encoding: "utf-8", timeout: 5000 }
+      )
+      return NextResponse.json({ ok: true, action: "Marked as approached" })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error"
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
+  }
+
+  // Simple fire-and-forget actions
+  if (!ALLOWED_ACTIONS[action]) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 })
   }
 

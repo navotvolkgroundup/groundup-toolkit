@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { hubspotSearchAll } from "@/lib/hubspot"
+import { withFreshness } from "@/lib/withFreshness"
 import { STAGE_LABELS, OWNER_NAMES, CLOSED_STAGES } from "@/lib/constants"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
       amount: d.properties.amount,
     }))
 
-    return NextResponse.json({ movements, staleDeals })
+    return NextResponse.json(withFreshness({ movements, staleDeals }, Date.now(), "hubspot", 3600))
   } catch (e) {
     console.error("Stage movements API error:", e)
     return NextResponse.json({ movements: [], staleDeals: [] })

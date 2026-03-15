@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Zap, Radar, Mail, CalendarCheck, Loader2 } from "lucide-react"
+import { Zap, Radar, Mail, CalendarCheck, Loader2, Newspaper, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 
@@ -17,6 +17,7 @@ const actions: ActionConfig[] = [
   { id: "scout", label: "Run Founder Scout", icon: Radar, action: "founder-scout-scan", color: "text-violet-400 hover:bg-violet-500/10" },
   { id: "email", label: "Process Emails", icon: Mail, action: "email-to-deal", color: "text-blue-400 hover:bg-blue-500/10" },
   { id: "meeting", label: "Check Meetings", icon: CalendarCheck, action: "meeting-check", color: "text-amber-400 hover:bg-amber-500/10" },
+  { id: "thesis", label: "Thesis Scanner", icon: Newspaper, action: "thesis-scanner", color: "text-emerald-400 hover:bg-emerald-500/10" },
 ]
 
 export function QuickActions() {

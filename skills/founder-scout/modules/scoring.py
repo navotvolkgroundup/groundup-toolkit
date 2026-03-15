@@ -69,15 +69,15 @@ def classify(composite_score):
 
 def _signal_types(signals):
     """Extract set of signal_type strings from a list of signal dicts."""
-    return {s.get('signal_type', s.get('type', '')).lower() for s in signals}
+    return {str(s.get('signal_type', s.get('type', '')) or '').lower() for s in signals}
 
 
 def _has_signal(signals, *keywords):
     """Check if any signal's type or description contains one of the keywords."""
     for s in signals:
         text = ' '.join([
-            s.get('signal_type', s.get('type', '')),
-            s.get('description', ''),
+            str(s.get('signal_type', s.get('type', '')) or ''),
+            str(s.get('description', '') or ''),
         ]).lower()
         for kw in keywords:
             if kw.lower() in text:
@@ -296,8 +296,8 @@ def calculate_intent_score(signals, company_registered=False):
     matched_types = set()
     for s in signals:
         text = ' '.join([
-            s.get('signal_type', s.get('type', '')),
-            s.get('description', ''),
+            str(s.get('signal_type', s.get('type', '')) or ''),
+            str(s.get('description', '') or ''),
         ]).lower()
         for kw in intent_keywords:
             if kw in text:
@@ -476,3 +476,205 @@ def get_score_changes(conn, days=7):
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Conviction Engine: Outcome Correlation & Weight Calibration
+# ---------------------------------------------------------------------------
+
+DIMENSIONS = ['timing', 'pedigree', 'activity', 'network', 'intent']
+MIN_OUTCOMES_FOR_CALIBRATION = 20
+
+
+def analyze_weight_effectiveness(conn):
+    """Analyze which scoring dimensions best predict positive outcomes.
+
+    For each dimension, computes mean score for positive outcomes (met/invested)
+    vs negative (passed/noise), then calculates an effectiveness ratio.
+
+    Requires MIN_OUTCOMES_FOR_CALIBRATION outcomes to produce suggestions.
+
+    Returns:
+        {
+            dimension: {
+                weight_current: float,
+                mean_positive: float,
+                mean_negative: float,
+                effectiveness: float,  # positive_mean / negative_mean (higher = better predictor)
+                suggested_weight: float,
+            },
+            ...
+            _meta: {total_outcomes, sufficient_data: bool}
+        }
+    """
+    rows = conn.execute('''
+        SELECT ps.timing_score, ps.pedigree_score, ps.activity_score,
+               ps.network_score, ps.intent_score, tp.outcome
+        FROM person_scores ps
+        JOIN tracked_people tp ON tp.id = ps.person_id
+        WHERE tp.outcome IS NOT NULL
+          AND ps.id IN (
+              SELECT MAX(id) FROM person_scores GROUP BY person_id
+          )
+    ''').fetchall()
+
+    total = len(rows)
+    result = {}
+
+    if total == 0:
+        for dim in DIMENSIONS:
+            result[dim] = {
+                'weight_current': WEIGHTS[dim],
+                'mean_positive': 0, 'mean_negative': 0,
+                'effectiveness': 0, 'suggested_weight': WEIGHTS[dim],
+            }
+        result['_meta'] = {'total_outcomes': 0, 'sufficient_data': False}
+        return result
+
+    # Split into positive and negative outcomes
+    positive = [r for r in rows if r[5] in ('met', 'invested')]
+    negative = [r for r in rows if r[5] in ('passed', 'noise')]
+
+    dim_indices = {'timing': 0, 'pedigree': 1, 'activity': 2, 'network': 3, 'intent': 4}
+    effectiveness_scores = {}
+
+    for dim, idx in dim_indices.items():
+        pos_mean = sum(r[idx] for r in positive) / len(positive) if positive else 0
+        neg_mean = sum(r[idx] for r in negative) / len(negative) if negative else 0
+
+        # Effectiveness: how much does this dimension differentiate positive from negative?
+        if neg_mean > 0:
+            effectiveness = round(pos_mean / neg_mean, 3)
+        elif pos_mean > 0:
+            effectiveness = 2.0  # positive signal with no negative baseline
+        else:
+            effectiveness = 1.0  # no signal
+
+        effectiveness_scores[dim] = effectiveness
+        result[dim] = {
+            'weight_current': WEIGHTS[dim],
+            'mean_positive': round(pos_mean, 1),
+            'mean_negative': round(neg_mean, 1),
+            'effectiveness': effectiveness,
+            'suggested_weight': 0,  # computed below
+        }
+
+    # Normalize effectiveness into suggested weights (must sum to 1.0)
+    sufficient = total >= MIN_OUTCOMES_FOR_CALIBRATION
+    total_effectiveness = sum(effectiveness_scores.values())
+
+    if total_effectiveness > 0 and sufficient:
+        for dim in DIMENSIONS:
+            result[dim]['suggested_weight'] = round(
+                effectiveness_scores[dim] / total_effectiveness, 3
+            )
+    else:
+        # Not enough data — suggest current weights
+        for dim in DIMENSIONS:
+            result[dim]['suggested_weight'] = WEIGHTS[dim]
+
+    result['_meta'] = {'total_outcomes': total, 'sufficient_data': sufficient}
+    return result
+
+
+def get_precision_by_tier(conn):
+    """Get precision stats per classification tier.
+
+    Returns:
+        {tier: {total, positive, precision}} for each tier with outcomes.
+    """
+    rows = conn.execute('''
+        SELECT ps.classification, tp.outcome, COUNT(*) as cnt
+        FROM person_scores ps
+        JOIN tracked_people tp ON tp.id = ps.person_id
+        WHERE tp.outcome IS NOT NULL
+          AND ps.id IN (
+              SELECT MAX(id) FROM person_scores GROUP BY person_id
+          )
+        GROUP BY ps.classification, tp.outcome
+    ''').fetchall()
+
+    tiers = {}
+    for classification, outcome, count in rows:
+        if classification not in tiers:
+            tiers[classification] = {'total': 0, 'positive': 0}
+        tiers[classification]['total'] += count
+        if outcome in ('met', 'invested'):
+            tiers[classification]['positive'] += count
+
+    for stats in tiers.values():
+        stats['precision'] = round(stats['positive'] / stats['total'], 2) if stats['total'] > 0 else 0
+
+    return tiers
+
+
+def apply_thesis_matching(composite_score, profile_text, thesis_config):
+    """Apply thesis area matching as a multiplier on composite score.
+
+    Args:
+        composite_score: raw composite score (0-100)
+        profile_text: person's LinkedIn profile text / headline
+        thesis_config: dict loaded from thesis.yaml with 'thesis_areas' and 'anti_thesis'
+
+    Returns:
+        (adjusted_score, thesis_match): tuple of adjusted score and matched thesis name or None
+    """
+    if not thesis_config or not profile_text:
+        return composite_score, None
+
+    text_lower = profile_text.lower()
+    best_match = None
+    best_boost = 1.0
+
+    # Check thesis areas
+    for area in thesis_config.get('thesis_areas', []):
+        keywords = area.get('keywords', [])
+        matches = sum(1 for kw in keywords if kw.lower() in text_lower)
+        if matches >= 2:  # require 2+ keyword matches
+            boost = area.get('weight_boost', 1.0)
+            if boost > best_boost:
+                best_boost = boost
+                best_match = area.get('name', 'Unknown')
+
+    # Check anti-thesis (only if no positive match)
+    if not best_match:
+        for anti in thesis_config.get('anti_thesis', []):
+            keywords = anti.get('keywords', [])
+            matches = sum(1 for kw in keywords if kw.lower() in text_lower)
+            if matches >= 2:
+                penalty = anti.get('weight_penalty', 1.0)
+                best_boost = penalty
+                best_match = f"Anti-thesis ({', '.join(keywords[:2])})"
+                break
+
+    adjusted = min(100, max(0, round(composite_score * best_boost)))
+    return adjusted, best_match
+
+
+def get_calibration_report(conn):
+    """Generate a full calibration report combining all conviction engine data.
+
+    Returns JSON-serializable dict for CLI and dashboard consumption.
+    """
+    effectiveness = analyze_weight_effectiveness(conn)
+    precision = get_precision_by_tier(conn)
+
+    meta = effectiveness.pop('_meta', {})
+    dimensions = {}
+    for dim in DIMENSIONS:
+        d = effectiveness.get(dim, {})
+        dimensions[dim] = {
+            'current_weight': d.get('weight_current', WEIGHTS.get(dim, 0)),
+            'suggested_weight': d.get('suggested_weight', WEIGHTS.get(dim, 0)),
+            'effectiveness': d.get('effectiveness', 0),
+            'mean_positive': d.get('mean_positive', 0),
+            'mean_negative': d.get('mean_negative', 0),
+        }
+
+    return {
+        'dimensions': dimensions,
+        'precision_by_tier': precision,
+        'total_outcomes': meta.get('total_outcomes', 0),
+        'sufficient_data': meta.get('sufficient_data', False),
+        'current_weights': dict(WEIGHTS),
+    }

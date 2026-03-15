@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.expanduser('~/.openclaw'))
 from lib.config import config
+from lib.atomic_write import atomic_json_write
 from lib.whatsapp import send_whatsapp
 
 LOG_DIR = '/var/log'
@@ -57,8 +58,7 @@ def load_state():
     return {k: v for k, v in data.items() if v > cutoff}
 
 def save_state(state):
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2) + '\n')
+    atomic_json_write(str(STATE_FILE), state)
 
 def error_hash(filename, line):
     return hashlib.md5(f"{filename}:{line.strip()}".encode()).hexdigest()[:12]

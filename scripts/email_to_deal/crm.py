@@ -2,6 +2,7 @@
 
 import logging
 import requests
+from difflib import SequenceMatcher
 
 log = logging.getLogger("email-to-deal")
 
@@ -150,3 +151,127 @@ def search_hubspot_deal(deal_name):
     except Exception as e:
         log.error('Error searching for deal: %s', e)
         return None
+
+
+def _fuzzy_search_company(company_name):
+    """Search HubSpot for a company using fuzzy CONTAINS_TOKEN matching.
+
+    Returns company ID if a result scores >= 0.85 similarity, else None.
+    """
+    if not MATON_API_KEY or not company_name:
+        return None
+    try:
+        url = f'{MATON_BASE_URL}/crm/v3/objects/companies/search'
+        headers = {
+            'Authorization': f'Bearer {MATON_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        # Use the longest token (word) for CONTAINS_TOKEN search
+        tokens = company_name.split()
+        search_token = max(tokens, key=len) if tokens else company_name
+        payload = {
+            'filterGroups': [{
+                'filters': [{
+                    'propertyName': 'name',
+                    'operator': 'CONTAINS_TOKEN',
+                    'value': search_token
+                }]
+            }],
+            'properties': ['name', 'domain'],
+            'limit': 10
+        }
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        if response.status_code != 200:
+            return None
+
+        results = response.json().get('results', [])
+        if not results:
+            return None
+
+        name_lower = company_name.lower().strip()
+        best_id = None
+        best_ratio = 0.0
+
+        for r in results:
+            hs_name = r.get('properties', {}).get('name', '')
+            ratio = SequenceMatcher(None, name_lower, hs_name.lower().strip()).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_id = r['id']
+
+        if best_ratio >= 0.85:
+            log.info('Fuzzy match: "%s" ~ HubSpot company ID %s (%.0f%%)', company_name, best_id, best_ratio * 100)
+            return best_id
+        return None
+    except Exception as e:
+        log.error('Error in fuzzy company search: %s', e)
+        return None
+
+
+def _search_company_by_domain(domain):
+    """Search HubSpot for a company by domain (exact match).
+
+    Returns company ID or None.
+    """
+    if not MATON_API_KEY or not domain:
+        return None
+    try:
+        url = f'{MATON_BASE_URL}/crm/v3/objects/companies/search'
+        headers = {
+            'Authorization': f'Bearer {MATON_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        payload = {
+            'filterGroups': [{
+                'filters': [{
+                    'propertyName': 'domain',
+                    'operator': 'EQ',
+                    'value': domain
+                }]
+            }],
+            'properties': ['name', 'domain'],
+            'limit': 1
+        }
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        if response.status_code == 200:
+            results = response.json().get('results', [])
+            if results:
+                log.info('Domain match: %s -> company ID %s', domain, results[0]['id'])
+                return results[0]['id']
+        return None
+    except Exception as e:
+        log.error('Error searching company by domain: %s', e)
+        return None
+
+
+def find_or_create_company(name, description='', domain=None):
+    """Find an existing HubSpot company or create a new one.
+
+    Multi-strategy dedup:
+      1. Search by domain (exact match) if provided
+      2. Search by exact name (EQ)
+      3. Search by fuzzy name (CONTAINS_TOKEN + SequenceMatcher >= 0.85)
+      4. Create new company if no match found
+
+    Returns:
+        Company ID string, or None on failure.
+    """
+    # Strategy 1: domain match
+    if domain:
+        company_id = _search_company_by_domain(domain)
+        if company_id:
+            return company_id
+
+    # Strategy 2: exact name match
+    company_id = search_hubspot_company(name)
+    if company_id:
+        return company_id
+
+    # Strategy 3: fuzzy name match
+    company_id = _fuzzy_search_company(name)
+    if company_id:
+        return company_id
+
+    # Strategy 4: create new
+    log.info('No existing company found for "%s" — creating new', name)
+    return create_hubspot_company({'name': name, 'description': description})
