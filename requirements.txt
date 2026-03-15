@@ -12,4 +12,7 @@ anthropic>=0.84.0
 # PDF processing (used by deal-analyzer export module)
 pdfplumber==0.11.8
 
+# Testing
+pytest>=8.0
+
 # Built-in (no install needed): sqlite3, json, re, subprocess, fcntl, hashlib

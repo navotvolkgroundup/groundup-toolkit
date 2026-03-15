@@ -23,7 +23,7 @@ Usage:
 import os
 import sqlite3
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 DEFAULT_DB_PATH = os.path.join(
@@ -105,7 +105,7 @@ class RelationshipGraph:
         Updates fields if provided and currently NULL.
         """
         conn = self._get_conn()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(tz=timezone.utc).isoformat()
 
         # Try email match
         if email:
@@ -204,7 +204,7 @@ class RelationshipGraph:
             id_a, id_b = id_b, id_a
 
         conn = self._get_conn()
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(tz=timezone.utc).isoformat()
 
         # Check for existing edge of same type
         existing = conn.execute(

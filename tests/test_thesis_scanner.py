@@ -15,9 +15,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 mock_config = MagicMock()
 mock_config.brave_search_api_key = ""
 mock_config.team_phones = {}
-sys.modules['lib.config'] = MagicMock(config=mock_config)
-sys.modules['lib.whatsapp'] = MagicMock()
-sys.modules['lib.brave'] = MagicMock()
+sys.modules.setdefault('lib.config', MagicMock(config=mock_config))
+sys.modules.setdefault('lib.whatsapp', MagicMock())
+sys.modules.setdefault('lib.brave', MagicMock())
 
 from scripts.thesis_scanner import (
     url_hash, load_seen, save_seen, format_digest,
@@ -124,11 +124,12 @@ def test_format_digest_caps_per_area():
 
 def test_scan_thesis_area_dedup(monkeypatch):
     """Already-seen URLs should be filtered out."""
+    import scripts.thesis_scanner as ts
     fake_results = [
         {"title": "Article 1", "url": "https://example.com/1", "description": "desc1"},
         {"title": "Article 2", "url": "https://example.com/2", "description": "desc2"},
     ]
-    monkeypatch.setattr("scripts.thesis_scanner.brave_search", lambda q, count=5: fake_results)
+    monkeypatch.setattr(ts, "brave_search", lambda q, count=5: fake_results)
 
     seen = set()
     area = {"name": "AI Infra", "keywords": ["infrastructure", "MLOps", "GPU"]}

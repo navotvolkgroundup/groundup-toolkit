@@ -47,7 +47,7 @@ jobs:
           python3 -m py_compile skills/meeting-reminders/reminders.py
 
       - name: Run unit tests
-        run: python3 -m unittest discover -s tests -v
+        run: python3 -m pytest tests/ -v
 
   typescript-checks:
     name: TypeScript checks
