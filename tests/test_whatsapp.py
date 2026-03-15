@@ -6,6 +6,8 @@ commands are executed.
 
 import os
 import sys
+import subprocess
+import time
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -17,16 +19,14 @@ _fake_config = MagicMock()
 _fake_lib_config = MagicMock()
 _fake_lib_config.config = _fake_config
 
-if 'lib' in sys.modules and not hasattr(sys.modules['lib'], '__path__'):
-    del sys.modules['lib']
-sys.modules['lib.config'] = _fake_lib_config
+sys.modules.setdefault('lib.config', _fake_lib_config)
 
 import lib.whatsapp as whatsapp  # noqa: E402
 
 
 class TestSendWhatsApp(unittest.TestCase):
 
-    @patch('lib.whatsapp.subprocess.run')
+    @patch.object(subprocess, 'run')
     def test_successful_send(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -41,8 +41,8 @@ class TestSendWhatsApp(unittest.TestCase):
         self.assertIn('--message', cmd)
         self.assertIn('Hello!', cmd)
 
-    @patch('lib.whatsapp.time.sleep')
-    @patch('lib.whatsapp.subprocess.run')
+    @patch.object(time, 'sleep')
+    @patch.object(subprocess, 'run')
     def test_retry_on_failure(self, mock_run, mock_sleep):
         fail_result = MagicMock(returncode=1, stderr='connection lost')
         ok_result = MagicMock(returncode=0)
@@ -53,8 +53,8 @@ class TestSendWhatsApp(unittest.TestCase):
         self.assertEqual(mock_run.call_count, 2)
         mock_sleep.assert_called_once_with(3)
 
-    @patch('lib.whatsapp.time.sleep')
-    @patch('lib.whatsapp.subprocess.run')
+    @patch.object(time, 'sleep')
+    @patch.object(subprocess, 'run')
     def test_all_retries_exhausted(self, mock_run, mock_sleep):
         mock_run.return_value = MagicMock(returncode=1, stderr='error')
 
@@ -62,7 +62,7 @@ class TestSendWhatsApp(unittest.TestCase):
         self.assertFalse(result)
         self.assertEqual(mock_run.call_count, 2)
 
-    @patch('lib.whatsapp.subprocess.run')
+    @patch.object(subprocess, 'run')
     def test_message_formatting_with_account(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -72,7 +72,7 @@ class TestSendWhatsApp(unittest.TestCase):
         self.assertIn('--account', cmd)
         self.assertIn('main', cmd)
 
-    @patch('lib.whatsapp.subprocess.run')
+    @patch.object(subprocess, 'run')
     def test_no_account_flag_when_none(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -81,8 +81,8 @@ class TestSendWhatsApp(unittest.TestCase):
         cmd = mock_run.call_args[0][0]
         self.assertNotIn('--account', cmd)
 
-    @patch('lib.whatsapp.time.sleep')
-    @patch('lib.whatsapp.subprocess.run')
+    @patch.object(time, 'sleep')
+    @patch.object(subprocess, 'run')
     def test_exception_triggers_retry(self, mock_run, mock_sleep):
         ok_result = MagicMock(returncode=0)
         mock_run.side_effect = [Exception('timeout'), ok_result]
