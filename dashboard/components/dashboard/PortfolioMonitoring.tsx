@@ -85,7 +85,7 @@ export function PortfolioMonitoring() {
   useEffect(() => {
     fetch("/api/portfolio")
       .then(r => r.json())
-      .then(d => { setCompanies(d.companies || []); setSummary(d.summary) })
+      .then(d => { const inner = d.data || d; setCompanies(inner.companies || []); setSummary(inner.summary) })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
