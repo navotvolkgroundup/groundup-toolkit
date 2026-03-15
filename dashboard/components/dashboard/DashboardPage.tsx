@@ -22,7 +22,6 @@ import { PortfolioSummary } from "@/components/dashboard/PortfolioSummary"
 import { ServiceGrid } from "@/components/services/ServiceGrid"
 import { KeyboardShortcuts } from "@/components/dashboard/KeyboardShortcuts"
 import { WhatsNewBanner } from "@/components/dashboard/WhatsNewBanner"
-import { useEventStream } from "@/lib/hooks/useEventStream"
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
@@ -33,8 +32,6 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 }
 
 export default function DashboardPage() {
-  useEventStream()
-
   return (
     <AppShell>
       <KeyboardShortcuts />
