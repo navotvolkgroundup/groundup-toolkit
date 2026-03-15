@@ -16,8 +16,6 @@ mock_config = MagicMock()
 mock_config.brave_search_api_key = ""
 mock_config.team_phones = {}
 sys.modules.setdefault('lib.config', MagicMock(config=mock_config))
-sys.modules.setdefault('lib.whatsapp', MagicMock())
-sys.modules.setdefault('lib.brave', MagicMock())
 
 from scripts.thesis_scanner import (
     url_hash, load_seen, save_seen, format_digest,
