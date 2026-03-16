@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { withFreshness } from "@/lib/withFreshness"
-import { execSync } from "child_process"
+import { execSync, execFileSync } from "child_process"
 
 const limiter = rateLimit({ interval: 60_000, limit: 30 })
 
@@ -280,25 +280,36 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await req.json()
-  const { signalId, outcome } = body as { signalId: string; outcome: string }
+  const { signalId, outcome, action } = body as { signalId: string; outcome?: string; action?: string }
 
-  const validOutcomes = ["met", "invested", "passed", "noise"]
-  if (!signalId || !validOutcomes.includes(outcome)) {
-    return NextResponse.json(
-      { error: `outcome must be one of: ${validOutcomes.join(", ")}` },
-      { status: 400 }
-    )
+  if (!signalId || !/^\d+$/.test(signalId)) {
+    return NextResponse.json({ error: "Invalid signalId" }, { status: 400 })
   }
 
+  const TOOLKIT_ROOT = process.env.TOOLKIT_ROOT || "/root/groundup-toolkit"
+  const scoutPath = `${TOOLKIT_ROOT}/skills/founder-scout/scout.py`
+
   try {
-    const TOOLKIT_ROOT = process.env.TOOLKIT_ROOT || "/root/groundup-toolkit"
-    execSync(
-      `python3 ${TOOLKIT_ROOT}/skills/founder-scout/scout.py outcome ${parseInt(signalId)} ${outcome}`,
-      { encoding: "utf-8", timeout: 5000 }
-    )
+    if (action === "approach") {
+      execFileSync("python3", [scoutPath, "approach-id", signalId], {
+        encoding: "utf-8", timeout: 10000,
+      })
+      return NextResponse.json({ ok: true, signalId, approached: true })
+    }
+
+    const validOutcomes = ["met", "invested", "passed", "noise"]
+    if (!outcome || !validOutcomes.includes(outcome)) {
+      return NextResponse.json(
+        { error: `outcome must be one of: ${validOutcomes.join(", ")}` },
+        { status: 400 }
+      )
+    }
+
+    execFileSync("python3", [scoutPath, "outcome", signalId, outcome], {
+      encoding: "utf-8", timeout: 5000,
+    })
     return NextResponse.json({ ok: true, signalId, outcome })
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error"
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: "Action failed" }, { status: 500 })
   }
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { motion } from "framer-motion"
 import { Radar, ExternalLink, Check, MoreHorizontal, Plus, Link2, Sparkles } from "lucide-react"
 import { useSignals } from "@/lib/hooks/useDashboardData"
@@ -67,6 +67,15 @@ export function SignalFeed() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [timelineCompany, setTimelineCompany] = useState<string | null>(null)
   const [filter, setFilter] = useState<FilterMode>("all")
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!openMenuId) return
+    const handleClick = () => setOpenMenuId(null)
+    document.addEventListener("click", handleClick)
+    return () => document.removeEventListener("click", handleClick)
+  }, [openMenuId])
 
   const markOutcome = useCallback(async (signalId: string, outcome: string) => {
     setOpenMenuId(null)
@@ -79,6 +88,20 @@ export function SignalFeed() {
       queryClient.invalidateQueries({ queryKey: ["signals"] })
     } catch {
       // Silently fail — will refresh on next poll
+    }
+  }, [queryClient])
+
+  const markApproached = useCallback(async (signalId: string) => {
+    setOpenMenuId(null)
+    try {
+      await fetch("/api/signals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signalId, action: "approach" }),
+      })
+      queryClient.invalidateQueries({ queryKey: ["signals"] })
+    } catch {
+      // Silently fail
     }
   }, [queryClient])
 
@@ -272,41 +295,51 @@ export function SignalFeed() {
                       <MiniSparkline data={signal.scoreTrend} />
                     )}
                     <span className="text-[9px] text-muted-foreground">{timeAgo(signal.timestamp)}</span>
-                    {!signal.outcome && (
-                      <div className="relative">
-                        <button
-                          onClick={() => setOpenMenuId(openMenuId === signal.id ? null : signal.id)}
-                          className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-muted/50 transition-all"
-                          title="Mark outcome"
+                    <div className="relative">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === signal.id ? null : signal.id) }}
+                        className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-muted/50 transition-all"
+                        title="Actions"
+                      >
+                        <MoreHorizontal className="h-3 w-3 text-muted-foreground" />
+                      </button>
+                      {openMenuId === signal.id && (
+                        <div
+                          className="absolute right-0 top-5 z-10 rounded-lg border border-border bg-card shadow-lg p-1 min-w-[120px]"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <MoreHorizontal className="h-3 w-3 text-muted-foreground" />
-                        </button>
-                        {openMenuId === signal.id && (
-                          <div className="absolute right-0 top-5 z-10 rounded-lg border border-border bg-card shadow-lg p-1 min-w-[100px]">
+                          <button
+                            onClick={() => createDeal(signal.id)}
+                            className="w-full text-left text-[10px] px-2 py-1 rounded hover:bg-muted/50 transition-colors text-emerald-400 flex items-center gap-1"
+                          >
+                            <Plus className="h-2.5 w-2.5" />
+                            Create Deal
+                          </button>
+                          {!signal.approached && (
                             <button
-                              onClick={() => createDeal(signal.id)}
-                              className="w-full text-left text-[10px] px-2 py-1 rounded hover:bg-muted/50 transition-colors text-emerald-400 flex items-center gap-1"
+                              onClick={() => markApproached(signal.id)}
+                              className="w-full text-left text-[10px] px-2 py-1 rounded hover:bg-muted/50 transition-colors text-green-400 flex items-center gap-1"
                             >
-                              <Plus className="h-2.5 w-2.5" />
-                              Create Deal
+                              <Check className="h-2.5 w-2.5" />
+                              Pinged
                             </button>
-                            <div className="h-px bg-border my-0.5" />
-                            {(["met", "invested", "passed", "noise"] as const).map((o) => (
-                              <button
-                                key={o}
-                                onClick={() => markOutcome(signal.id, o)}
-                                className={cn(
-                                  "w-full text-left text-[10px] px-2 py-1 rounded hover:bg-muted/50 transition-colors",
-                                  outcomeConfig[o].color
-                                )}
-                              >
-                                {outcomeConfig[o].label}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                          )}
+                          <div className="h-px bg-border my-0.5" />
+                          {(["met", "invested", "passed", "noise"] as const).map((o) => (
+                            <button
+                              key={o}
+                              onClick={() => markOutcome(signal.id, o)}
+                              className={cn(
+                                "w-full text-left text-[10px] px-2 py-1 rounded hover:bg-muted/50 transition-colors",
+                                outcomeConfig[o].color
+                              )}
+                            >
+                              {outcomeConfig[o].label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )
