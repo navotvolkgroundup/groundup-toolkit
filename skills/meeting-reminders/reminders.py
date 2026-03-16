@@ -14,6 +14,9 @@ import pytz
 
 # Shared config loader
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from lib.structured_log import get_logger
+log = get_logger("meeting-reminders")
+
 from lib.config import config
 from lib.whatsapp import send_whatsapp
 from lib.gws import gws_gmail_send

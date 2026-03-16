@@ -1,7 +1,14 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
+import { rateLimit } from '@/lib/rate-limit'
+import { withFreshness } from '@/lib/withFreshness'
 
-export async function GET(request: Request) {
+const limiter = rateLimit({ interval: 60_000, limit: 20 })
+
+export async function GET(request: NextRequest) {
+  const { ok } = await limiter.check(request)
+  if (!ok) return NextResponse.json({ error: 'Too Many Requests' }, { status: 429 })
+
   const session = await auth()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -31,7 +38,7 @@ export async function GET(request: Request) {
       if (title) items.push({ title, link: link.trim(), pubDate, source })
     }
 
-    return NextResponse.json({ news: items })
+    return NextResponse.json(withFreshness({ news: items }, null, "hubspot"))
   } catch (err: any) {
     return NextResponse.json({ news: [], error: err.message })
   }

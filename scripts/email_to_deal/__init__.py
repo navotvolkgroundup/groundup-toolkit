@@ -10,11 +10,11 @@ import re
 import json
 import fcntl
 import tempfile
-import logging
 import requests
 from datetime import datetime
 
-log = logging.getLogger("email-to-deal")
+from lib.structured_log import get_logger
+log = get_logger("email-to-deal")
 
 from lib.config import config
 from lib.gws import gws_gmail_thread_get

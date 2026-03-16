@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { hubspotSearchAll } from "@/lib/hubspot"
+import { withFreshness } from "@/lib/withFreshness"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
 
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
       weeks.push({ week: weekStart.toISOString().slice(0, 10), label, count })
     }
 
-    return NextResponse.json({ weeks, totalDeals: deals.length })
+    return NextResponse.json(withFreshness({ weeks, totalDeals: deals.length }, null, "hubspot"))
   } catch (e) {
     console.error("Deal flow API error:", e)
     return NextResponse.json({ weeks: [], totalDeals: 0 })

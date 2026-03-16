@@ -6,6 +6,7 @@ import { SERVICE_LOG_PATHS } from "@/lib/constants"
 import { execSync } from "child_process"
 import { statSync } from "fs"
 import type { Notification, NotificationLevel } from "@/lib/types"
+import { withFreshness } from "@/lib/withFreshness"
 
 const limiter = rateLimit({ interval: 60_000, limit: 120 })
 
@@ -228,7 +229,7 @@ export async function GET(req: NextRequest) {
   const cacheKey = "notifications:parsed"
   const cached = getCached<Notification[]>(cacheKey)
   if (cached) {
-    return NextResponse.json({ notifications: cached, timestamp: new Date().toISOString() })
+    return NextResponse.json(withFreshness({ notifications: cached, timestamp: new Date().toISOString() }, null, "log_file", 3600, true))
   }
 
   const notifications: Notification[] = []
@@ -263,5 +264,5 @@ export async function GET(req: NextRequest) {
 
   setCache(cacheKey, result, CACHE_TTL)
 
-  return NextResponse.json({ notifications: result, timestamp: new Date().toISOString() })
+  return NextResponse.json(withFreshness({ notifications: result, timestamp: new Date().toISOString() }, null, "log_file"))
 }

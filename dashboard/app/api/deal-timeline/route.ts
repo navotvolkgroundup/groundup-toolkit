@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
-import { execSync } from "child_process"
+import { execFileSync } from "child_process"
+import { withFreshness } from "@/lib/withFreshness"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
 
@@ -35,20 +36,22 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // SECURITY FIX (C-2): Use execFileSync with argument arrays to prevent command injection.
+    // Previously, company/dealId were interpolated into shell strings with incomplete escaping.
     const args = company
-      ? `--company "${company.replace(/"/g, '\\"')}"`
-      : `--deal-id ${dealId}`
+      ? ["--company", company]
+      : ["--deal-id", dealId!]
 
-    const result = execSync(
-      `python3 ${TOOLKIT_ROOT}/scripts/deal_timeline.py ${args}`,
+    const result = execFileSync(
+      "python3",
+      [`${TOOLKIT_ROOT}/scripts/deal_timeline.py`, ...args],
       { encoding: "utf-8", timeout: 15000 }
     ).trim()
 
     const timeline = JSON.parse(result) as TimelineResponse
-    return NextResponse.json(timeline)
+    return NextResponse.json(withFreshness(timeline, null, "hubspot"))
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error"
-    console.error("Timeline error:", message)
+    console.error("Timeline error:", err)
     return NextResponse.json(
       { company: company || "", companyId: null, events: [] },
       { status: 200 }

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { hubspotSearchAll } from "@/lib/hubspot"
 import { execSync } from "child_process"
+import { withFreshness } from "@/lib/withFreshness"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
 
@@ -50,12 +51,12 @@ export async function GET(req: NextRequest) {
       ? Math.round((signalDeals.length / signalsDetected) * 100)
       : 0
 
-    return NextResponse.json({
+    return NextResponse.json(withFreshness({
       signalsDetected,
       dealsCreated: signalDeals.length,
       conversionRate,
       totalDeals: deals.length,
-    })
+    }, null, "log_file"))
   } catch (e) {
     console.error("Signal conversion API error:", e)
     return NextResponse.json({ signalsDetected: 0, dealsCreated: 0, conversionRate: 0, totalDeals: 0 })

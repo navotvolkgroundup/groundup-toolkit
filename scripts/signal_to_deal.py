@@ -215,6 +215,9 @@ def create_deal_for_person(person, company_name, dry_run=False):
         except Exception as e:
             log.warning("Failed to add note: %s", e)
 
+    # Capture relationship: signal conversion creates a deal-linked relationship
+    _capture_deal_relationship(person, company_name, deal_id)
+
     return {
         'deal_id': deal_id,
         'deal_name': deal_name,
@@ -223,6 +226,29 @@ def create_deal_for_person(person, company_name, dry_run=False):
         'thesis_match': thesis_match,
         'note': note_text,
     }
+
+
+def _capture_deal_relationship(person, company_name, deal_id):
+    """Add a signal-to-deal conversion relationship to the relationship graph."""
+    try:
+        from lib.relationship_graph import RelationshipGraph
+        graph = RelationshipGraph()
+        graph.add_relationship(
+            person_a={'name': 'GroundUp Team', 'email': 'team@groundup.vc', 'role': 'team'},
+            person_b={
+                'name': person.get('name', 'Unknown'),
+                'linkedin_url': person.get('linkedin_url'),
+                'company': company_name,
+                'hubspot_contact_id': person.get('hubspot_contact_id'),
+                'role': 'founder',
+            },
+            rel_type='deal_created',
+            context=f"Deal {deal_id} from signal",
+            source='founder-scout',
+        )
+        graph.close()
+    except Exception as e:
+        log.warning("Relationship graph capture failed: %s", e)
 
 
 def main():

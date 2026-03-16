@@ -3,6 +3,7 @@
 import { motion } from "framer-motion"
 import { GitBranch, ChevronDown, ChevronUp } from "lucide-react"
 import { usePipeline } from "@/lib/hooks/useDashboardData"
+import { FreshnessBadge } from "@/components/ui/FreshnessBadge"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 
@@ -21,7 +22,9 @@ const stageColors: Record<string, string> = {
 }
 
 export function PipelineFunnel() {
-  const { data, isLoading } = usePipeline()
+  const { data: envelope, isLoading } = usePipeline()
+  const data = envelope?.data
+  const meta = envelope?.meta
   const [expanded, setExpanded] = useState<string | null>(null)
 
   if (isLoading) {
@@ -52,7 +55,10 @@ export function PipelineFunnel() {
           <GitBranch className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">Deal Pipeline</h2>
         </div>
-        <span className="text-xs text-muted-foreground">{data?.totalDeals || 0} total deals</span>
+        <div className="flex items-center gap-2">
+          {meta && <FreshnessBadge meta={meta} />}
+          <span className="text-xs text-muted-foreground">{data?.totalDeals || 0} total deals</span>
+        </div>
       </div>
 
       <div className="space-y-1.5">

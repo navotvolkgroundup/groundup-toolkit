@@ -6,6 +6,7 @@ import logging
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.expanduser('~/.openclaw'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from email_to_deal import main
 
@@ -20,13 +21,7 @@ from email_to_deal.extractor import (
 from email_to_deal.config import _is_own_firm_name
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler("/var/log/deal-automation.log"),
-        ],
-    )
+    from lib.structured_log import get_logger
+    _log = get_logger("email-to-deal")
+    _log.addHandler(logging.FileHandler("/var/log/deal-automation.log"))
     main()

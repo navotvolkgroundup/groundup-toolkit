@@ -81,7 +81,6 @@ import re
 import json
 import time
 import fcntl
-import logging
 import sqlite3
 import contextlib
 import tempfile
@@ -89,10 +88,11 @@ import subprocess
 import requests
 from datetime import datetime, timedelta
 
-log = logging.getLogger("founder-scout")
-
 # Load shared config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from lib.structured_log import get_logger
+log = get_logger("founder-scout")
+
 from lib.config import config
 from lib.claude import call_claude
 from lib.whatsapp import send_whatsapp
@@ -1240,15 +1240,11 @@ def run_enhanced_github_scan():
 # --- Entry Point ---
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler("/var/log/founder-scout.log"),
-        ],
-    )
+    # Add file handler (structured_log already set up the stream handler)
+    import logging as _logging
+    fh = _logging.FileHandler("/var/log/founder-scout.log")
+    fh.setFormatter(log.handlers[0].formatter)
+    log.addHandler(fh)
 
     if len(sys.argv) < 2:
         log.info(__doc__)

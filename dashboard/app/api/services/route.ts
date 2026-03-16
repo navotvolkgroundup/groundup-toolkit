@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { defaultServices } from "@/lib/data/services"
+import { withFreshness } from "@/lib/withFreshness"
 import * as fs from "fs"
 import * as path from "path"
 
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  return NextResponse.json(defaultServices)
+  return NextResponse.json(withFreshness(defaultServices, null, "config"))
 }
 
 export async function PATCH(req: NextRequest) {

@@ -18,12 +18,12 @@ import json
 import time
 import base64
 import hashlib
-import logging
 import tempfile
 import requests
 from datetime import datetime
 
-log = logging.getLogger("portfolio-monitor")
+from lib.structured_log import get_logger
+log = get_logger("portfolio-monitor")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.config import config

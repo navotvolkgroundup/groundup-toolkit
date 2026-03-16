@@ -4,6 +4,7 @@ import { useState, useCallback, useMemo } from "react"
 import { motion } from "framer-motion"
 import { Radar, ExternalLink, Check, MoreHorizontal, Plus, Link2, Sparkles } from "lucide-react"
 import { useSignals } from "@/lib/hooks/useDashboardData"
+import { FreshnessBadge } from "@/components/ui/FreshnessBadge"
 import { useQueryClient } from "@tanstack/react-query"
 import { cn } from "@/lib/utils"
 import { DealTimeline } from "./DealTimeline"
@@ -61,6 +62,7 @@ function MiniSparkline({ data }: { data: number[] }) {
 export function SignalFeed() {
   const { data: envelope, isLoading } = useSignals()
   const data = envelope?.data
+  const meta = envelope?.meta
   const queryClient = useQueryClient()
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [timelineCompany, setTimelineCompany] = useState<string | null>(null)
@@ -144,7 +146,10 @@ export function SignalFeed() {
             <Radar className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">Founder Signals</h2>
           </div>
-          <span className="text-xs text-muted-foreground">{signals.length}{filter !== "all" ? `/${allSignals.length}` : ""} recent</span>
+          <div className="flex items-center gap-2">
+            {meta && <FreshnessBadge meta={meta} />}
+            <span className="text-xs text-muted-foreground">{signals.length}{filter !== "all" ? `/${allSignals.length}` : ""} recent</span>
+          </div>
         </div>
 
         {/* Filters */}

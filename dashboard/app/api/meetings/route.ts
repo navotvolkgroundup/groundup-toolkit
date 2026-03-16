@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { execSync } from "child_process"
+import { withFreshness } from "@/lib/withFreshness"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
 
@@ -127,5 +128,5 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const meetings = parseMeetingLogs()
-  return NextResponse.json({ meetings })
+  return NextResponse.json(withFreshness({ meetings }, null, "log_file"))
 }

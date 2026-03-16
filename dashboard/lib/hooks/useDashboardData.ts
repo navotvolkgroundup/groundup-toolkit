@@ -39,7 +39,7 @@ function fetchJsonDelayed<T>(url: string, delayMs: number): () => Promise<T> {
 export function usePipeline() {
   return useQuery({
     queryKey: ["pipeline"],
-    queryFn: () => fetchJson<{
+    queryFn: () => fetchWithMeta<{
       stages: Array<{ id: string; label: string; order: number; count: number; deals: Array<{ name: string; amount: string | null; owner: string | null; created: string | null }> }>
       totalDeals: number
     }>("/api/pipeline"),

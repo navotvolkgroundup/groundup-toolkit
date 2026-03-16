@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
-import { execSync } from "child_process"
+import { execFileSync } from "child_process"
 
 const limiter = rateLimit({ interval: 60_000, limit: 10 })
 
@@ -48,21 +48,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 })
   }
 
-  // Parameterized actions
+  // SECURITY FIX (C-1): Use execFileSync with argument arrays to prevent command injection.
+  // Previously, dealId/stageId/personId were interpolated into shell strings.
   if (action === "move-deal-stage") {
     const { dealId, stageId } = body as { dealId?: string; stageId?: string }
     if (!dealId || !stageId) {
       return NextResponse.json({ error: "dealId and stageId required" }, { status: 400 })
     }
+    if (!/^\d+$/.test(dealId) || !/^\d+$/.test(stageId)) {
+      return NextResponse.json({ error: "Invalid dealId or stageId" }, { status: 400 })
+    }
     try {
-      const result = execSync(
-        `python3 ${TOOLKIT_ROOT}/scripts/deal_action.py move-stage ${dealId} ${stageId}`,
+      const result = execFileSync(
+        "python3",
+        [`${TOOLKIT_ROOT}/scripts/deal_action.py`, "move-stage", dealId, stageId],
         { encoding: "utf-8", timeout: 10000 }
       )
       return NextResponse.json({ ok: true, action: "Deal stage updated", result: JSON.parse(result) })
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error"
-      return NextResponse.json({ error: message }, { status: 500 })
+      console.error("move-deal-stage error:", err)
+      return NextResponse.json({ error: "Failed to update deal stage" }, { status: 500 })
     }
   }
 
@@ -71,15 +76,19 @@ export async function POST(req: NextRequest) {
     if (!personId) {
       return NextResponse.json({ error: "personId required" }, { status: 400 })
     }
+    if (!/^\d+$/.test(personId)) {
+      return NextResponse.json({ error: "Invalid personId" }, { status: 400 })
+    }
     try {
-      const result = execSync(
-        `python3 ${TOOLKIT_ROOT}/scripts/signal_to_deal.py ${personId} --json`,
+      const result = execFileSync(
+        "python3",
+        [`${TOOLKIT_ROOT}/scripts/signal_to_deal.py`, personId, "--json"],
         { encoding: "utf-8", timeout: 15000 }
       ).trim()
       return NextResponse.json({ ok: true, action: "Deal created from signal", result: JSON.parse(result) })
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error"
-      return NextResponse.json({ error: message }, { status: 500 })
+      console.error("signal-to-deal error:", err)
+      return NextResponse.json({ error: "Failed to create deal from signal" }, { status: 500 })
     }
   }
 
@@ -88,15 +97,19 @@ export async function POST(req: NextRequest) {
     if (!personId) {
       return NextResponse.json({ error: "personId required" }, { status: 400 })
     }
+    if (!/^\d+$/.test(personId)) {
+      return NextResponse.json({ error: "Invalid personId" }, { status: 400 })
+    }
     try {
-      execSync(
-        `python3 ${TOOLKIT_ROOT}/skills/founder-scout/scout.py approach-id ${personId}`,
+      execFileSync(
+        "python3",
+        [`${TOOLKIT_ROOT}/skills/founder-scout/scout.py`, "approach-id", personId],
         { encoding: "utf-8", timeout: 5000 }
       )
       return NextResponse.json({ ok: true, action: "Marked as approached" })
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error"
-      return NextResponse.json({ error: message }, { status: 500 })
+      console.error("mark-approached error:", err)
+      return NextResponse.json({ error: "Failed to mark as approached" }, { status: 500 })
     }
   }
 
@@ -108,7 +121,7 @@ export async function POST(req: NextRequest) {
   const actionConfig = ALLOWED_ACTIONS[action]
 
   try {
-    execSync(actionConfig.command, { timeout: 5000, encoding: "utf-8" })
+    execFileSync("bash", ["-c", actionConfig.command], { timeout: 5000, encoding: "utf-8" })
     return NextResponse.json({ ok: true, action: actionConfig.description })
   } catch {
     // Background processes will "fail" since they fork — that's expected

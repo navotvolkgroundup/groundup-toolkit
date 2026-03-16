@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
+import { withFreshness } from "@/lib/withFreshness"
 import { hubspotSearchAllCached } from "@/lib/hubspot"
 import { PIPELINE_STAGES } from "@/lib/constants"
 
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest) {
       deals: (stageCounts[s.id]?.deals || []).slice(0, 10),
     }))
 
-    return NextResponse.json({ stages, totalDeals: allDeals.length })
+    return NextResponse.json(withFreshness({ stages, totalDeals: allDeals.length }, null, "hubspot"))
   } catch (e) {
     console.error("Pipeline API error:", e)
     return NextResponse.json({ error: "Failed to fetch pipeline" }, { status: 500 })

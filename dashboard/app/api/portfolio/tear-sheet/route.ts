@@ -1,9 +1,16 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/lib/auth'
+import { rateLimit } from '@/lib/rate-limit'
 import { execSync } from 'child_process'
 import { writeFileSync, readFileSync, unlinkSync } from 'fs'
 
-export async function POST(request: Request) {
+// SECURITY FIX (H-1): Add rate limiting (was missing)
+const limiter = rateLimit({ interval: 60_000, limit: 5 })
+
+export async function POST(request: NextRequest) {
+  const { ok } = await limiter.check(request)
+  if (!ok) return NextResponse.json({ error: 'Too Many Requests' }, { status: 429 })
+
   const session = await auth()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

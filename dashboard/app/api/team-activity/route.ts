@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { hubspotSearchAllCached } from "@/lib/hubspot"
 import { OWNER_NAMES } from "@/lib/constants"
+import { withFreshness } from "@/lib/withFreshness"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
 
@@ -67,7 +68,7 @@ export async function GET(req: NextRequest) {
       heatmap.push({ member: memberName, weeks: weekCounts })
     }
 
-    return NextResponse.json({ heatmap, weekLabels, totalDeals: deals.length })
+    return NextResponse.json(withFreshness({ heatmap, weekLabels, totalDeals: deals.length }, null, "hubspot"))
   } catch (e) {
     console.error("Team activity API error:", e)
     return NextResponse.json({ heatmap: [], weekLabels: [], totalDeals: 0 })

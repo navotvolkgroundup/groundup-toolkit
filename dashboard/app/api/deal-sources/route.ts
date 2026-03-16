@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { hubspotSearchAll } from "@/lib/hubspot"
+import { withFreshness } from "@/lib/withFreshness"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
 
@@ -57,7 +58,7 @@ export async function GET(req: NextRequest) {
       .filter((s) => s.count > 0)
       .sort((a, b) => b.count - a.count)
 
-    return NextResponse.json({ sources: breakdown, total: deals.length })
+    return NextResponse.json(withFreshness({ sources: breakdown, total: deals.length }, null, "hubspot"))
   } catch (e) {
     console.error("Deal sources API error:", e)
     return NextResponse.json({ sources: [], total: 0 })

@@ -109,3 +109,33 @@
 ## Fix 23: CSRF Protection [L-3]
 - Analyzed and confirmed: already covered by JSON-only Content-Type parsing + SameSite=Lax cookies
 - No additional custom header check needed
+
+---
+
+## Round 3 — Command Injection Fixes (2026-03-15)
+
+## Fix 24: Command Injection in `/api/actions` [CRITICAL C-1]
+- Replaced all `execSync` template string calls with `execFileSync` + argument arrays
+- `dealId`, `stageId`, `personId` now passed as separate args, never shell-interpolated
+- Added `/^\d+$/` regex validation for all numeric IDs before execution
+- Replaced `err.message` with generic error messages to prevent info leakage
+
+## Fix 25: Command Injection in `/api/deal-timeline` [CRITICAL C-2]
+- Replaced `execSync` with `execFileSync("python3", [script, "--company", company])`
+- `company` and `dealId` now passed as separate arguments
+- Removed incomplete quote-escaping logic (`replace(/"/g, '\"')`) that was trivially bypassed
+
+## Fix 26: Command Injection in `/api/relationships` [CRITICAL C-3]
+- Replaced all `execSync` calls with `execFileSync` + argument arrays
+- `from`, `to`, `person` params now passed as arguments, not shell-interpolated
+- Removed inadequate quote removal (`replace(/"/g, "")`)
+- Added `rateLimit({ interval: 60_000, limit: 20 })` (was missing entirely)
+
+## Fix 27: Rate Limiting for Portfolio Routes [HIGH H-1]
+- Added `rateLimit({ interval: 60_000, limit: 5 })` to `/api/portfolio/tear-sheet`
+- Added `rateLimit({ interval: 60_000, limit: 5 })` to `/api/portfolio/add-context`
+- Changed `Request` type to `NextRequest` for rate limiter compatibility
+
+## Fix 28: PDF Path Injection in `/api/portfolio/add-context` [MEDIUM M-2]
+- Replaced inline Python template in `execSync` with `execFileSync` using `sys.argv`
+- Temp file paths now passed as command arguments instead of embedded in Python code string

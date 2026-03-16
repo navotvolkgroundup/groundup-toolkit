@@ -1,10 +1,16 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
+import { rateLimit } from "@/lib/rate-limit"
 import { hubspotPost, hubspotCreateObject, hubspotCreateAssociation } from "@/lib/hubspot"
+import { withFreshness } from "@/lib/withFreshness"
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
+const limiter = rateLimit({ interval: 60_000, limit: 20 })
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const { ok } = await limiter.check(request)
+  if (!ok) return NextResponse.json({ error: "Too Many Requests" }, { status: 429 })
+
   const session = await auth()
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
@@ -32,7 +38,7 @@ export async function GET(request: Request) {
       } catch { /* skip */ }
     }
 
-    return NextResponse.json({ investments })
+    return NextResponse.json(withFreshness({ investments }, null, "hubspot"))
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }

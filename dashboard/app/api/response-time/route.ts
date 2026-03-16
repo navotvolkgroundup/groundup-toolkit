@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/lib/auth"
 import { rateLimit } from "@/lib/rate-limit"
 import { execSync } from "child_process"
+import { withFreshness } from "@/lib/withFreshness"
 
 const limiter = rateLimit({ interval: 60_000, limit: 20 })
 
@@ -49,12 +50,12 @@ export async function GET(req: NextRequest) {
       ? Math.round(last30Days.sort((a, b) => a - b)[Math.floor(last30Days.length / 2)])
       : 0
 
-    return NextResponse.json({
+    return NextResponse.json(withFreshness({
       avgMinutes,
       medianMinutes,
       totalProcessed: last30Days.length,
       trend: processingTimes.slice(-10).map((t) => Math.round(t)),
-    })
+    }, null, "log_file"))
   } catch (e) {
     console.error("Response time API error:", e)
     return NextResponse.json({ avgMinutes: 0, medianMinutes: 0, totalProcessed: 0, trend: [] })

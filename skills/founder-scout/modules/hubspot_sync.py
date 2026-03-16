@@ -74,6 +74,7 @@ def run_sync_hubspot(db, SCOUT_RECIPIENTS):
         contact_id = create_contact(firstname, lastname, linkedin_url, extra_props)
         if contact_id:
             db.set_hubspot_contact_id(person['id'], contact_id)
+            _capture_lead_relationship(person, contact_id)
             created += 1
         else:
             log.error("Failed to create contact for %s", name)
@@ -232,7 +233,32 @@ def sync_new_leads_to_hubspot(db, profiles):
                 continue
 
         # Link to tracked person in local DB
-        person = db.get_person_by_linkedin(url) if url else None
-        person_id = person if isinstance(person, int) else (person['id'] if person and isinstance(person, dict) else None)
+        person_record = db.get_person_by_linkedin(url) if url else None
+        person_id = person_record if isinstance(person_record, int) else (person_record['id'] if person_record and isinstance(person_record, dict) else None)
         if person_id and hubspot_id:
             db.set_hubspot_contact_id(person_id, str(hubspot_id))
+
+        # Capture relationship: founder-scout discovered this lead
+        _capture_lead_relationship({'name': name, 'linkedin_url': url}, str(hubspot_id))
+
+
+def _capture_lead_relationship(person_data, hubspot_contact_id):
+    """Add a founder-scout → lead relationship to the relationship graph."""
+    try:
+        from lib.relationship_graph import RelationshipGraph
+        graph = RelationshipGraph()
+        graph.add_relationship(
+            person_a={'name': 'GroundUp Team', 'email': 'team@groundup.vc', 'role': 'team'},
+            person_b={
+                'name': person_data.get('name', 'Unknown'),
+                'linkedin_url': person_data.get('linkedin_url'),
+                'hubspot_contact_id': hubspot_contact_id,
+                'role': 'founder',
+            },
+            rel_type='hubspot_lead',
+            context='Synced via Founder Scout',
+            source='hubspot',
+        )
+        graph.close()
+    except Exception as e:
+        log.warning("Relationship graph capture failed: %s", e)
