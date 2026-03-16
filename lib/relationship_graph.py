@@ -254,6 +254,16 @@ class RelationshipGraph:
     # Queries
     # ------------------------------------------------------------------
 
+    def search_people(self, query):
+        """Search people by partial name or email. Returns list of dicts."""
+        conn = self._get_conn()
+        q = f"%{query.lower()}%"
+        rows = conn.execute(
+            "SELECT * FROM people WHERE LOWER(name) LIKE ? OR LOWER(email) LIKE ? ORDER BY name LIMIT 20",
+            (q, q),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_person(self, email=None, linkedin_url=None, name=None):
         """Look up a person by email, linkedin_url, or name. Returns dict or None."""
         conn = self._get_conn()
@@ -266,7 +276,15 @@ class RelationshipGraph:
             if row:
                 return dict(row)
         if name:
+            # Try exact match first
             row = conn.execute("SELECT * FROM people WHERE LOWER(name) = LOWER(?)", (name,)).fetchone()
+            if row:
+                return dict(row)
+            # Fall back to partial match (e.g. "tom" matches "Tom Nipravsky")
+            row = conn.execute(
+                "SELECT * FROM people WHERE LOWER(name) LIKE ? ORDER BY name LIMIT 1",
+                (f"%{name.lower()}%",),
+            ).fetchone()
             if row:
                 return dict(row)
         return None

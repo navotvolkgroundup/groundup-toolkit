@@ -73,6 +73,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(withFreshness(stats, null, "sqlite"))
     }
 
+    if (action === "search" && person) {
+      const result = execFileSync(
+        "python3",
+        [`${TOOLKIT_ROOT}/scripts/relationship_query.py`, "--json", "search", person],
+        { encoding: "utf-8", timeout: 5000 }
+      ).trim()
+
+      const people = result ? JSON.parse(result) : []
+      return NextResponse.json(withFreshness({ people }, null, "sqlite"))
+    }
+
     // Default: connections
     if (!person) {
       return NextResponse.json({ error: "Missing 'person' parameter" }, { status: 400 })

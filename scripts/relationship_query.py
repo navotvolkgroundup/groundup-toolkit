@@ -80,6 +80,9 @@ def main():
     path_parser.add_argument('from_id', help="Start person (email/name)")
     path_parser.add_argument('to_id', help="Target person (email/name)")
 
+    search_parser = sub.add_parser('search', help="Search people by partial name/email")
+    search_parser.add_argument('query', help="Search query")
+
     sub.add_parser('stats', help="Show graph statistics")
 
     args = parser.parse_args()
@@ -90,6 +93,17 @@ def main():
             cmd_connections(graph, args.identifier, as_json=args.json)
         elif args.command == 'intro-path':
             cmd_intro_path(graph, args.from_id, args.to_id, as_json=args.json)
+        elif args.command == 'search':
+            results = graph.search_people(args.query)
+            if args.json:
+                print(json.dumps(results, indent=2, default=str))
+            elif not results:
+                print(f"No people found matching '{args.query}'.")
+            else:
+                print(f"Found {len(results)} match(es) for '{args.query}':\n")
+                for p in results:
+                    company = f" @ {p['company']}" if p.get('company') else ""
+                    print(f"  {p['name']}{company} — {p.get('email') or 'no email'}")
         elif args.command == 'stats':
             cmd_stats(graph, as_json=args.json)
         else:
