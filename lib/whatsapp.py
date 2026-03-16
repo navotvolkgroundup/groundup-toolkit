@@ -26,6 +26,10 @@ def send_whatsapp(phone, message, account=None, max_retries=3, retry_delay=3):
     Returns:
         True on success, False on failure.
     """
+    if not phone or not phone.strip():
+        print(f"  WhatsApp skipped: no phone number provided", file=sys.stderr)
+        return False
+
     for attempt in range(1, max_retries + 1):
         try:
             cmd = [
