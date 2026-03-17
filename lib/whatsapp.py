@@ -38,7 +38,7 @@ def send_whatsapp(phone, message, account=None, max_retries=3, retry_delay=3):
                 '--target', phone,
                 '--message', message
             ]
-            if account:
+            if account and account not in ('default', 'main'):
                 cmd.extend(['--account', account])
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)

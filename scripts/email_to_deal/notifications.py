@@ -15,7 +15,7 @@ def send_whatsapp(phone, message):
     cmd = [
         'openclaw', 'message', 'send',
         '--channel', 'whatsapp',
-        '--account', WHATSAPP_ACCOUNT,
+
         '--target', phone,
         '--message', message
     ]

@@ -135,6 +135,10 @@ def _is_bad_company_name(name):
     for prefix in bad_starts:
         if name_lower.startswith(prefix):
             return True
+    # Our own fund names should never be extracted as a company
+    own_names = ["ground up", "groundup", "ground up ventures", "groundup vc", "groundup ventures"]
+    if name_lower.strip() in own_names:
+        return True
     return False
 
 

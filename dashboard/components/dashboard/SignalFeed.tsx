@@ -69,12 +69,15 @@ export function SignalFeed() {
   const [filter, setFilter] = useState<FilterMode>("all")
   const menuRef = useRef<HTMLDivElement>(null)
 
-  // Close menu on outside click
+  // Close menu on outside click (use mousedown to avoid interfering with button onClick)
   useEffect(() => {
     if (!openMenuId) return
-    const handleClick = () => setOpenMenuId(null)
-    document.addEventListener("click", handleClick)
-    return () => document.removeEventListener("click", handleClick)
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return
+      setOpenMenuId(null)
+    }
+    document.addEventListener("mousedown", handleClick)
+    return () => document.removeEventListener("mousedown", handleClick)
   }, [openMenuId])
 
   const markOutcome = useCallback(async (signalId: string, outcome: string) => {
@@ -295,7 +298,7 @@ export function SignalFeed() {
                       <MiniSparkline data={signal.scoreTrend} />
                     )}
                     <span className="text-[9px] text-muted-foreground">{timeAgo(signal.timestamp)}</span>
-                    <div className="relative">
+                    <div className="relative" ref={openMenuId === signal.id ? menuRef : undefined}>
                       <button
                         onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === signal.id ? null : signal.id) }}
                         className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-muted/50 transition-all"
@@ -306,7 +309,7 @@ export function SignalFeed() {
                       {openMenuId === signal.id && (
                         <div
                           className="absolute right-0 top-5 z-10 rounded-lg border border-border bg-card shadow-lg p-1 min-w-[120px]"
-                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
                         >
                           <button
                             onClick={() => createDeal(signal.id)}

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.expanduser('~/.openclaw'))
 from lib.config import config
 from lib.gws import gws_gmail_search, gws_gmail_thread_get, gws_gmail_modify, gws_gmail_send
 
-WHATSAPP_ACCOUNT = getattr(config, 'whatsapp_account', 'main')
+WHATSAPP_ACCOUNT = None  # use default account
 _TOOLKIT_ROOT = os.environ.get('TOOLKIT_ROOT', os.path.join(os.path.dirname(__file__), '..'))
 OPTIN_FILE = os.path.join(_TOOLKIT_ROOT, 'data', 'meeting-brief-optin.json')
 PROCESSED_LABEL = "MeetingBrief-Processed"
@@ -72,7 +72,6 @@ def send_whatsapp(phone, message):
     cmd = [
         'openclaw', 'message', 'send',
         '--channel', 'whatsapp',
-        '--account', WHATSAPP_ACCOUNT,
         '--target', phone,
         '--message', message
     ]
