@@ -63,14 +63,23 @@ class TestSendWhatsApp(unittest.TestCase):
         self.assertEqual(mock_run.call_count, 2)
 
     @patch.object(subprocess, 'run')
-    def test_message_formatting_with_account(self, mock_run):
+    def test_message_formatting_with_custom_account(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
 
-        whatsapp.send_whatsapp('+9876543210', 'Test msg', account='main')
+        whatsapp.send_whatsapp('+9876543210', 'Test msg', account='secondary')
 
         cmd = mock_run.call_args[0][0]
         self.assertIn('--account', cmd)
-        self.assertIn('main', cmd)
+        self.assertIn('secondary', cmd)
+
+    @patch.object(subprocess, 'run')
+    def test_default_and_main_accounts_skipped(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+
+        for name in ('default', 'main'):
+            whatsapp.send_whatsapp('+9876543210', 'Test', account=name)
+            cmd = mock_run.call_args[0][0]
+            self.assertNotIn('--account', cmd, f"account='{name}' should be skipped")
 
     @patch.object(subprocess, 'run')
     def test_no_account_flag_when_none(self, mock_run):
