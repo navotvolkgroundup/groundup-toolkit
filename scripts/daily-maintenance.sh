@@ -45,7 +45,7 @@ if [ "$BEFORE" != "$AFTER" ]; then
     else
         log "WhatsApp still connected after update"
     fi
-elif [ $UPDATE_RC -eq 0 ]; then
+elif [ $UPDATE_RC -eq 0 ] || ([ $UPDATE_RC -eq 1 ] && [ "$BEFORE" = "$AFTER" ]); then
     log "Already on latest: $BEFORE"
 else
     fail "Update command failed (rc=$UPDATE_RC)"
