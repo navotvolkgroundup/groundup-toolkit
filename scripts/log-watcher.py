@@ -51,6 +51,10 @@ TRANSIENT_RE = re.compile(
     r"gws-auth error.*Traceback|KeyError: 'access_token'"
     r'|Action send requires a target'
     r'|Read timed out.*gateway\.maton\.ai'
+    r'|gws-auth timeout.*calendar events'
+    r'|Could not identify owner.*skipping'
+    r'|Claude API error: HTTP 400'
+    r'|No active WhatsApp Web listener'
     r')', re.IGNORECASE)
 
 STATE_FILE = Path(__file__).resolve().parent.parent / 'data' / 'log-watcher-seen.json'
