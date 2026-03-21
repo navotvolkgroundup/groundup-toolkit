@@ -45,6 +45,14 @@ ERROR_RE = re.compile(
     # Process / system failures
     r'|killed|OOM|out of memory|Segmentation fault'
     r')', re.IGNORECASE)
+# Transient errors to suppress (self-recovering, not actionable)
+TRANSIENT_RE = re.compile(
+    r'('
+    r"gws-auth error.*Traceback|KeyError: 'access_token'"
+    r'|Action send requires a target'
+    r'|Read timed out.*gateway\.maton\.ai'
+    r')', re.IGNORECASE)
+
 STATE_FILE = Path(__file__).resolve().parent.parent / 'data' / 'log-watcher-seen.json'
 
 def load_state():
@@ -88,6 +96,8 @@ def scan_logs(hours):
             with open(path, 'r', errors='replace') as f:
                 for line in f:
                     if not ERROR_RE.search(line):
+                        continue
+                    if TRANSIENT_RE.search(line):
                         continue
                     ts = _parse_ts(line)
                     if ts and ts < cutoff:
