@@ -346,7 +346,8 @@ def calculate_composite_score(
     all_signals = list(signals) + list(github_signals or []) + list(connection_signals or [])
 
     timing_score, timing_expl = calculate_timing_score(person_data, signals)
-    pedigree_score, pedigree_expl = calculate_pedigree_score(person_data, idf_data)
+    idf_unit = idf_data.get('unit') if isinstance(idf_data, dict) else idf_data
+    pedigree_score, pedigree_expl = calculate_pedigree_score(person_data, idf_unit)
     activity_score, activity_expl = calculate_activity_score(
         signals, github_signals=github_signals,
         going_dark=going_dark, advisory_count=advisory_count,
