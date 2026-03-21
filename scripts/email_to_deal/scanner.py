@@ -19,7 +19,7 @@ def check_recent_emails():
     """Check for new emails via gws."""
     log.debug('Checking for new emails...')
     team_emails = ' OR '.join([f'from:{email}' for email in TEAM_MEMBERS.keys()])
-    query = f'in:inbox -{PROCESSED_LABEL} ({team_emails}) newer_than:24h'
+    query = f'in:inbox -{PROCESSED_LABEL} ({team_emails}) newer_than:48h'
     return gws_gmail_search(query, max_results=100)
 
 
@@ -54,7 +54,7 @@ def mark_email_processed(thread_id):
 def check_roastmydeck_emails():
     """Check for new RoastMyDeck analysis emails."""
     log.debug('Checking RoastMyDeck emails...')
-    query = f"in:inbox -{PROCESSED_LABEL} subject:[RoastMyDeck] newer_than:24h"
+    query = f"in:inbox -{PROCESSED_LABEL} subject:[RoastMyDeck] newer_than:48h"
     return gws_gmail_search(query, max_results=100)
 
 
