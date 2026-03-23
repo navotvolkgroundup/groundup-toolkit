@@ -18,8 +18,30 @@ def run_weekly_briefing(db, SCOUT_RECIPIENTS):
     since = (datetime.now() - timedelta(days=7)).isoformat()
     recent_signals = db.get_signals_since(since)
 
-    high_signals = [s for s in recent_signals if s['signal_tier'] == 'high']
-    medium_signals = [s for s in recent_signals if s['signal_tier'] == 'medium']
+    # Group signals by person — each person appears once with extra signals as sub-bullets
+    from collections import OrderedDict
+    grouped = OrderedDict()
+    for s in recent_signals:
+        key = s.get('person_id') or s.get('name')
+        if key not in grouped:
+            grouped[key] = {'primary': s, 'extra': []}
+        else:
+            # Keep highest-tier signal as primary
+            if s['signal_tier'] == 'high' and grouped[key]['primary']['signal_tier'] != 'high':
+                grouped[key]['extra'].append(grouped[key]['primary'])
+                grouped[key]['primary'] = s
+            else:
+                grouped[key]['extra'].append(s)
+
+    high_signals = []
+    medium_signals = []
+    for g in grouped.values():
+        entry = g['primary'].copy()
+        entry['extra_signals'] = g['extra']
+        if entry['signal_tier'] == 'high':
+            high_signals.append(entry)
+        else:
+            medium_signals.append(entry)
 
     db_stats = db.get_stats()
     stats = {'active': db_stats['active']}

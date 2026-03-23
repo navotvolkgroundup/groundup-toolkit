@@ -140,6 +140,10 @@ def _format_enriched_signal(i, s, include_enrichment=True):
         if enrichment.get('thesis'):
             lines.append(f"   Thesis fit: {enrichment['thesis']}")
 
+    # Render additional signals for this person as sub-bullets
+    for extra in s.get('extra_signals', []):
+        lines.append(f"   + {extra.get('description', 'N/A')}")
+
     lines.append("")
     return lines
 
