@@ -1,0 +1,22 @@
+#!/bin/bash
+# US Founder Scout — CLI wrapper for Scout.py
+# Installed as OpenClaw skill executable
+
+SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCOUT_PY="$SKILL_DIR/scout.py"
+
+# Load environment
+if [ -f ~/.env ]; then
+    set -a
+    source ~/.env
+    set +a
+fi
+
+# Ensure ANTHROPIC_API_KEY is set
+if [ -z "$ANTHROPIC_API_KEY" ]; then
+    echo "ERROR: ANTHROPIC_API_KEY not set in .env"
+    exit 1
+fi
+
+# Run scout.py with all arguments
+exec python3 "$SCOUT_PY" "$@"

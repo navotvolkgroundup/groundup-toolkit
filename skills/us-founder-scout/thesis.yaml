@@ -1,0 +1,103 @@
+# Investment thesis configuration for US Founder Scout scoring.
+# Focuses on US deep tech, defense tech, and dual-use founders.
+# Modify this file to align with GroundUp's US investment focus.
+
+thesis_areas:
+  - name: "Defense Tech"
+    keywords:
+      - "defense"
+      - "defense contractor"
+      - "military"
+      - "intelligence"
+      - "autonomous"
+      - "drone"
+      - "ISR"
+      - "command and control"
+      - "counter-drone"
+      - "CBRN"
+      - "undersea"
+    weight_boost: 1.3
+
+  - name: "Deep Tech Hardware"
+    keywords:
+      - "hardware"
+      - "semiconductor"
+      - "chip"
+      - "photonics"
+      - "quantum"
+      - "robotics"
+      - "autonomous vehicle"
+      - "space"
+      - "satellite"
+      - "launch"
+      - "orbital"
+    weight_boost: 1.25
+
+  - name: "AI Infrastructure"
+    keywords:
+      - "infrastructure"
+      - "MLOps"
+      - "model serving"
+      - "training"
+      - "GPU"
+      - "inference"
+      - "LLM"
+      - "foundation model"
+      - "vector database"
+      - "AI chip"
+    weight_boost: 1.2
+
+  - name: "Biotechnology & Life Sciences"
+    keywords:
+      - "biotech"
+      - "synthetic biology"
+      - "CRISPR"
+      - "protein"
+      - "drug discovery"
+      - "therapeutics"
+      - "medical device"
+      - "clinical"
+    weight_boost: 1.15
+
+  - name: "Energy Technology"
+    keywords:
+      - "energy"
+      - "nuclear"
+      - "fusion"
+      - "battery"
+      - "grid"
+      - "renewable"
+      - "clean energy"
+      - "power generation"
+    weight_boost: 1.15
+
+  - name: "Developer Tools & Infrastructure"
+    keywords:
+      - "developer"
+      - "devtools"
+      - "API"
+      - "SDK"
+      - "platform"
+      - "observability"
+      - "CI/CD"
+      - "infrastructure"
+    weight_boost: 1.1
+
+anti_thesis:
+  - keywords:
+      - "consumer"
+      - "social media"
+      - "gaming"
+      - "e-commerce"
+      - "marketplace"
+      - "D2C"
+      - "fashion"
+    weight_penalty: 0.5
+
+  - keywords:
+      - "crypto"
+      - "NFT"
+      - "DeFi"
+      - "blockchain"
+      - "Web3"
+    weight_penalty: 0.4

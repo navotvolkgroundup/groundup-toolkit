@@ -1,0 +1,25 @@
+{
+  "name": "us-founder-scout",
+  "version": "1.0.0",
+  "description": "Proactive discovery of US tech founders about to start new companies via LinkedIn and Twitter/X signals. Local tracking, no CRM sync. Jordan-only access.",
+  "author": "GroundUp Toolkit",
+  "executables": [
+    {
+      "name": "us-founder-scout",
+      "description": "Run US founder scout actions: scan, briefing, watchlist-update, status, add, dismiss, approach",
+      "triggers": [
+        "us.*founder.*scout",
+        "founder.*scout.*us",
+        "american.*founder.*scout"
+      ]
+    },
+    {
+      "name": "us-founder-scout",
+      "description": "Mark a founder as approached — updates local DB only",
+      "triggers": [
+        "approached.*founder",
+        "i.*approached.*founder"
+      ]
+    }
+  ]
+}
