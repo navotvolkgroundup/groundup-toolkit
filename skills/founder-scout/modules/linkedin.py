@@ -18,7 +18,7 @@ def linkedin_browser_available():
     """Check if the LinkedIn browser session is available."""
     try:
         result = subprocess.run(
-            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'status', '--json'],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'status'],
             capture_output=True, text=True, timeout=10
         )
         return result.returncode == 0

@@ -37,7 +37,7 @@ def twitter_browser_available():
     """Check if the Twitter browser session is available."""
     try:
         result = subprocess.run(
-            ['openclaw', 'browser', '--browser-profile', TWITTER_BROWSER_PROFILE, 'status', '--json'],
+            ['openclaw', 'browser', '--browser-profile', TWITTER_BROWSER_PROFILE, 'status'],
             capture_output=True, text=True, timeout=10
         )
         return result.returncode == 0
