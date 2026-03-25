@@ -252,7 +252,7 @@ LOW = Accelerator completion, grants, advisory roles
 
     try:
         response = call_claude(
-            model="claude-opus-4-6",
+            model="claude-haiku-4-5-20251001",
             system="You are an expert at identifying tech founders. Respond only with valid JSON.",
             messages=[{"role": "user", "content": prompt}]
         )

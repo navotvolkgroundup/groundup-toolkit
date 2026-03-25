@@ -173,7 +173,7 @@ LOW = No clear signals or older posts
 
     try:
         response = call_claude(
-            model="claude-opus-4-6",
+            model="claude-haiku-4-5-20251001",
             system="You are an expert at identifying founder signals. Analyze Twitter activity. Respond only with valid JSON.",
             messages=[{"role": "user", "content": prompt}]
         )
