@@ -166,8 +166,8 @@ def extract_profiles_from_search(search_snapshot):
     while i < len(lines):
         line = lines[i].strip()
 
-        # Look for: link "View <Name>'s profile"
-        view_match = re.search(r'link "View (.+?)\'s profile"', line)
+        # Look for: link "View <Name>'s profile" (apostrophe may be Unicode \u2019)
+        view_match = re.search(r'link "View (.+?)[\'\u2019]s profile"', line)
         if view_match:
             name = view_match.group(1)
 
