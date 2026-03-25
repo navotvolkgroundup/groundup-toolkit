@@ -80,7 +80,7 @@ def _parse_ts(line):
     m = re.search(r'(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})', line)
     if m:
         try:
-            return datetime.fromisoformat(m.group(1))
+            return datetime.fromisoformat(m.group(1)).replace(tzinfo=timezone.utc)
         except ValueError:
             pass
     return None
