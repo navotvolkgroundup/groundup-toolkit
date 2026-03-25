@@ -516,22 +516,54 @@ def cmd_scan():
 
         conn.commit()
 
-        # Send alerts for HIGH signal founders
+        # Send alerts for HIGH/MEDIUM signal founders
         if high_signal_founders:
-            alert_message = f"🚀 US Founder Scout: {len(high_signal_founders)} potential founders detected\n\n"
+            jordan = config.get_member_by_name("Jordan")
+            jordan_phone = jordan.get("phone") if jordan else None
+            jordan_email = jordan.get("email") if jordan else None
+
+            # WhatsApp: short summary
+            wa_msg = f"🚀 US Founder Scout: {len(high_signal_founders)} potential founder(s) detected\n\n"
             for founder in high_signal_founders:
-                alert_message += f"• {founder['name']} [{founder['signal_tier']}]\n"
-                alert_message += f"  {founder.get('source_company', 'Unknown')}\n"
+                wa_msg += f"• {founder['name']} [{founder['signal_tier']}]\n"
+                wa_msg += f"  Source: {founder.get('source_company', 'Unknown')}\n"
+            wa_msg += "\nFull details sent to your email."
+
+            # Email: full context
+            email_lines = [
+                f"US Founder Scout detected {len(high_signal_founders)} potential founder(s) with HIGH/MEDIUM signals.\n",
+            ]
+            for founder in high_signal_founders:
+                email_lines.append(f"{'=' * 60}")
+                email_lines.append(f"Name: {founder['name']}")
+                email_lines.append(f"Signal Tier: {founder['signal_tier']}")
+                email_lines.append(f"Source: {founder.get('source', 'unknown')} — {founder.get('source_company', 'Unknown')}")
+                email_lines.append(f"Headline: {founder.get('headline', 'N/A')}")
+                email_lines.append(f"LinkedIn: {founder.get('linkedin_url', 'N/A')}")
+                if founder.get('github_url'):
+                    email_lines.append(f"GitHub: {founder['github_url']}")
+                reasons = founder.get('reasons', [])
+                if reasons:
+                    email_lines.append(f"Signals:")
+                    for r in reasons:
+                        email_lines.append(f"  - {r}")
+                email_lines.append("")
+            email_lines.append(f"{'=' * 60}")
+            email_lines.append(f"Total scanned: {len(all_founders)} profiles")
+            email_lines.append(f"HIGH/MEDIUM signals: {len(high_signal_founders)}")
+            email_body = "\n".join(email_lines)
 
             try:
-                jordan = config.get_member_by_name("Jordan")
-                jordan_phone = jordan.get("phone") if jordan else None
                 if jordan_phone:
-                    send_whatsapp(jordan_phone, alert_message)
-                else:
-                    log.warning("Jordan's phone not found in config")
+                    send_whatsapp(jordan_phone, wa_msg)
+                if jordan_email:
+                    send_email(
+                        jordan_email,
+                        f"US Founder Scout: {len(high_signal_founders)} signal(s) detected",
+                        email_body,
+                    )
             except Exception as e:
-                log.warning(f"Could not send WhatsApp alert: {e}")
+                log.warning(f"Could not send alert: {e}")
 
         print(f"✅ Scan complete: {len(all_founders)} founders discovered ({len(high_signal_founders)} with HIGH/MEDIUM signals)")
         log.info(f"Daily scan complete: {len(all_founders)} founders, {len(high_signal_founders)} high signals")
