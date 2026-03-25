@@ -74,10 +74,28 @@ try:
     from lib.structured_log import get_logger
     from lib.config import config
     from lib.claude import call_claude
+    from lib.email import send_email
+    from lib.whatsapp import send_whatsapp
 except ImportError as e:
     print(f"Error: Missing shared library. {e}")
     print("Make sure you're running from the toolkit root or have PYTHONPATH set.")
     sys.exit(1)
+
+# Import local modules
+try:
+    from modules.linkedin import (
+        linkedin_browser_available, linkedin_search, linkedin_profile_lookup,
+        extract_profiles_from_search, filter_relevant_profiles,
+        analyze_linkedin_profile, extract_github_from_linkedin,
+        LINKEDIN_NAV_DELAY
+    )
+    from modules.twitter import (
+        twitter_browser_available, twitter_search, twitter_profile_timeline,
+        extract_signal_keywords, analyze_twitter_activity
+    )
+except ImportError as e:
+    print(f"Warning: Could not import local modules: {e}")
+    # Graceful degradation - modules will be used if available
 
 log = get_logger("us-founder-scout")
 
@@ -256,36 +274,165 @@ def scan_deep_tech_alumni():
     """Search LinkedIn for deep tech company alumni with founding signals."""
     log.info("Starting deep tech alumni scan...")
 
-    # For now, this would use browser automation (Selenium/Chromium) to:
-    # 1. Search LinkedIn for past employees of each company
-    # 2. Filter for "current company: blank or self-employed or stealth"
-    # 3. Analyze each profile with Claude
+    if not linkedin_browser_available():
+        log.error("LinkedIn browser session not available")
+        return []
 
-    # This is a stub that would be implemented with browser automation
-    log.info("(Browser automation placeholder: would search LinkedIn)")
-    return []
+    results = []
+
+    # Rotate through a few companies each scan
+    import random
+    companies_to_scan = []
+    for category, companies in DEEP_TECH_COMPANIES.items():
+        if companies:
+            companies_to_scan.append(random.choice(companies))
+
+    for company in companies_to_scan[:3]:  # Limit to 3 per scan
+        log.info(f"Scanning deep tech alumni from {company}...")
+
+        # Search LinkedIn for recent ex-employees
+        query = f"{company} founder leaving startup new venture"
+        search_html = linkedin_search(query)
+
+        if not search_html:
+            log.warning(f"Failed to search for {company} alumni")
+            continue
+
+        # Extract profile URLs and names
+        profiles = extract_profiles_from_search(search_html)
+        log.info(f"Found {len(profiles)} potential profiles for {company}")
+
+        # Filter and analyze top profiles
+        filtered = filter_relevant_profiles(profiles)
+
+        for profile in filtered[:5]:  # Limit lookups to 5 per company
+            try:
+                # Get full profile
+                profile_text = linkedin_profile_lookup(profile['linkedin_url'])
+                if not profile_text:
+                    continue
+
+                # Analyze with Claude
+                analysis = analyze_linkedin_profile(profile['name'], profile_text)
+
+                if analysis.get('is_founder_signal'):
+                    results.append({
+                        'name': profile['name'],
+                        'linkedin_url': profile['linkedin_url'],
+                        'headline': profile.get('headline', ''),
+                        'signal_tier': analysis.get('signal_tier', 'LOW'),
+                        'reasons': analysis.get('reasons', []),
+                        'source': 'deeptech_alumni',
+                        'source_company': company,
+                        'github_url': extract_github_from_linkedin(profile_text)
+                    })
+
+                time.sleep(2)  # Rate limiting
+            except Exception as e:
+                log.error(f"Error analyzing {profile['name']}: {e}")
+                continue
+
+    log.info(f"Deep tech scan found {len(results)} potential founders")
+    return results
+
 
 def scan_gup_alumni():
     """Search for Ground Up portfolio company alumni with founding signals."""
     log.info("Starting Ground Up portfolio alumni scan...")
 
-    # Similar to deep tech scan, but with portfolio company names
-    # Flag matches with source="gup_alumni" for warm intro potential
+    if not linkedin_browser_available():
+        log.error("LinkedIn browser session not available")
+        return []
 
-    log.info("(Browser automation placeholder: would search LinkedIn)")
-    return []
+    results = []
+
+    # Pick a few portfolio companies to scan
+    import random
+    portfolio_companies = []
+    for fund, companies in GROUND_UP_PORTFOLIO.items():
+        if companies:
+            portfolio_companies.append(random.choice(companies))
+
+    for company in portfolio_companies[:2]:  # Limit to 2 per scan
+        log.info(f"Scanning GUP alumni from {company}...")
+
+        query = f"{company} founder startup leaving"
+        search_html = linkedin_search(query)
+
+        if not search_html:
+            log.warning(f"Failed to search for {company} alumni")
+            continue
+
+        profiles = extract_profiles_from_search(search_html)
+        log.info(f"Found {len(profiles)} profiles from {company}")
+
+        filtered = filter_relevant_profiles(profiles)
+
+        for profile in filtered[:4]:
+            try:
+                profile_text = linkedin_profile_lookup(profile['linkedin_url'])
+                if not profile_text:
+                    continue
+
+                analysis = analyze_linkedin_profile(profile['name'], profile_text)
+
+                if analysis.get('is_founder_signal'):
+                    results.append({
+                        'name': profile['name'],
+                        'linkedin_url': profile['linkedin_url'],
+                        'headline': profile.get('headline', ''),
+                        'signal_tier': analysis.get('signal_tier', 'LOW'),
+                        'reasons': analysis.get('reasons', []),
+                        'source': 'gup_alumni',
+                        'source_company': company,
+                        'github_url': extract_github_from_linkedin(profile_text)
+                    })
+
+                time.sleep(2)
+            except Exception as e:
+                log.error(f"Error analyzing {profile['name']}: {e}")
+                continue
+
+    log.info(f"GUP alumni scan found {len(results)} potential founders")
+    return results
+
 
 def scan_twitter_signals():
     """Monitor Twitter/X for founder keywords and tracked people."""
     log.info("Starting Twitter/X signal scan...")
 
-    # Browser automation to search Twitter for:
-    # - "stealth building", "day 1", "we're hiring"
-    # - "left [company]", "chapter 2", "new chapter"
-    # - Tracked founders' recent activity
+    if not twitter_browser_available():
+        log.warning("Twitter browser session not available")
+        return []
 
-    log.info("(Browser automation placeholder: would search Twitter/X)")
-    return []
+    signals = []
+
+    # Search for founding keywords
+    founding_searches = [
+        '"stealth" startup founder',
+        '"building something" founder US',
+        '"day 1" founder startup',
+        'founder "left" startup 2024 2025'
+    ]
+
+    for query in founding_searches[:2]:  # Limit searches
+        log.info(f"Twitter search: {query}")
+
+        try:
+            search_result = twitter_search(query)
+            if search_result:
+                signals.append({
+                    'query': query,
+                    'raw_text': search_result
+                })
+
+            time.sleep(3)  # Rate limiting
+        except Exception as e:
+            log.error(f"Twitter search error for '{query}': {e}")
+            continue
+
+    log.info(f"Twitter scan found {len(signals)} signal searches")
+    return signals
 
 # ============================================================================
 # COMMAND HANDLERS
@@ -299,36 +446,89 @@ def cmd_scan():
     conn = get_db()
     c = conn.cursor()
 
-    # Scan deep tech alumni
-    results = scan_deep_tech_alumni()
-    log.info(f"Found {len(results)} potential founders from deep tech alumni")
+    all_founders = []
+    high_signal_founders = []
 
-    # Scan Ground Up alumni
-    gup_results = scan_gup_alumni()
-    log.info(f"Found {len(gup_results)} potential founders from GUP alumni")
+    try:
+        # Scan deep tech alumni
+        results = scan_deep_tech_alumni()
+        log.info(f"Found {len(results)} potential founders from deep tech alumni")
+        all_founders.extend(results)
 
-    # Scan Twitter
-    twitter_results = scan_twitter_signals()
-    log.info(f"Found {len(twitter_results)} signals from Twitter/X")
+        # Scan Ground Up alumni
+        gup_results = scan_gup_alumni()
+        log.info(f"Found {len(gup_results)} potential founders from GUP alumni")
+        all_founders.extend(gup_results)
 
-    # Process and store results
-    for founder in results + gup_results:
-        try:
-            c.execute('''
-                INSERT OR REPLACE INTO founders
-                (name, linkedin_url, signal_tier, source, status, updated_at)
-                VALUES (?, ?, ?, ?, 'OPEN', CURRENT_TIMESTAMP)
-            ''', (founder['name'], founder['linkedin_url'],
-                  founder.get('signal_tier', 'MEDIUM'),
-                  founder.get('source', 'manual')))
-        except Exception as e:
-            log.error(f"Error storing founder {founder.get('name')}: {e}")
+        # Scan Twitter
+        twitter_results = scan_twitter_signals()
+        log.info(f"Found {len(twitter_results)} signal searches from Twitter/X")
 
-    conn.commit()
-    conn.close()
+        # Process and store results
+        for founder in all_founders:
+            try:
+                # Check if already in database
+                c.execute('SELECT id, status FROM founders WHERE linkedin_url = ?',
+                         (founder['linkedin_url'],))
+                existing = c.fetchone()
 
-    print(f"Scan complete: {len(results) + len(gup_results)} founders discovered")
-    log.info("Daily scan complete")
+                if existing:
+                    # Update existing
+                    c.execute('''
+                        UPDATE founders SET
+                        signal_tier = ?, source = ?, source_company = ?,
+                        last_scanned = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                        WHERE linkedin_url = ?
+                    ''', (founder['signal_tier'], founder['source'],
+                          founder.get('source_company', ''), founder['linkedin_url']))
+                else:
+                    # Insert new
+                    c.execute('''
+                        INSERT INTO founders
+                        (name, linkedin_url, signal_tier, source, source_company, status, last_scanned)
+                        VALUES (?, ?, ?, ?, ?, 'OPEN', CURRENT_TIMESTAMP)
+                    ''', (founder['name'], founder['linkedin_url'],
+                          founder['signal_tier'], founder['source'],
+                          founder.get('source_company', '')))
+
+                # Store signal
+                founder_id = existing[0] if existing else c.lastrowid
+                c.execute('''
+                    INSERT INTO signals
+                    (founder_id, signal_type, description, tier)
+                    VALUES (?, ?, ?, ?)
+                ''', (founder_id, 'linkedin_profile',
+                      ', '.join(founder.get('reasons', [])),
+                      founder['signal_tier']))
+
+                if founder['signal_tier'] in ('HIGH', 'MEDIUM'):
+                    high_signal_founders.append(founder)
+
+            except Exception as e:
+                log.error(f"Error storing founder {founder.get('name')}: {e}")
+
+        conn.commit()
+
+        # Send alerts for HIGH signal founders
+        if high_signal_founders:
+            alert_message = f"🚀 US Founder Scout: {len(high_signal_founders)} potential founders detected\n\n"
+            for founder in high_signal_founders:
+                alert_message += f"• {founder['name']} [{founder['signal_tier']}]\n"
+                alert_message += f"  {founder.get('source_company', 'Unknown')}\n"
+
+            try:
+                send_whatsapp(message=alert_message, recipient='Jordan')
+            except Exception as e:
+                log.warning(f"Could not send WhatsApp alert: {e}")
+
+        print(f"✅ Scan complete: {len(all_founders)} founders discovered ({len(high_signal_founders)} with HIGH/MEDIUM signals)")
+        log.info(f"Daily scan complete: {len(all_founders)} founders, {len(high_signal_founders)} high signals")
+
+    except Exception as e:
+        log.error(f"Scan failed: {e}", exc_info=True)
+        print(f"❌ Scan failed: {e}")
+    finally:
+        conn.close()
 
 def cmd_briefing():
     """Generate weekly briefing of HIGH/MEDIUM signals."""
