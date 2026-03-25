@@ -35,7 +35,7 @@ def linkedin_browser_available():
         return False
 
 
-def linkedin_search(query):
+def linkedin_search(query, geo_us_only=True):
     """Search LinkedIn for people using the browser skill. Returns HTML snapshot text."""
     try:
         log.info(f"LinkedIn search: {query}")
@@ -46,7 +46,9 @@ def linkedin_search(query):
             capture_output=True, text=True, timeout=5
         ).stdout.strip()
 
-        url = f"https://www.linkedin.com/search/results/people/?keywords={encoded}"
+        # geoUrn 103644278 = United States
+        geo_param = "&geoUrn=%5B%22103644278%22%5D" if geo_us_only else ""
+        url = f"https://www.linkedin.com/search/results/people/?keywords={encoded}{geo_param}"
 
         # Navigate to search results
         subprocess.run(
@@ -201,8 +203,15 @@ def extract_profiles_from_search(search_snapshot):
     return profiles
 
 
+NON_US_LOCATIONS = [
+    'tel aviv', 'israel', 'london', 'uk', 'india', 'bangalore', 'mumbai',
+    'berlin', 'paris', 'tokyo', 'singapore', 'toronto', 'amsterdam',
+    'beijing', 'shanghai', 'seoul', 'sydney', 'melbourne',
+]
+
+
 def filter_relevant_profiles(profiles, target_keywords=None):
-    """Filter profiles for founding signals based on keywords."""
+    """Filter profiles for founding signals based on keywords. Excludes non-US locations."""
     if not target_keywords:
         target_keywords = [
             'founder', 'co-founder', 'CEO', 'CTO', 'CPO', 'VP Engineering',
@@ -213,6 +222,11 @@ def filter_relevant_profiles(profiles, target_keywords=None):
     for profile in profiles:
         headline = profile.get('headline', '').lower()
         name = profile.get('name', '').lower()
+        location = profile.get('location', '').lower()
+
+        # Skip non-US locations
+        if any(loc in headline or loc in location for loc in NON_US_LOCATIONS):
+            continue
 
         # Check if headline or name contains founding keywords
         if any(kw.lower() in headline or kw.lower() in name for kw in target_keywords):
