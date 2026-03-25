@@ -172,27 +172,24 @@ LOW = No clear signals or older posts
 """
 
     try:
-        response = call_claude(
+        import json
+        text = call_claude(
+            prompt,
+            system_prompt="You are an expert at identifying founder signals. Analyze Twitter activity. Respond only with valid JSON.",
             model="claude-haiku-4-5-20251001",
-            system="You are an expert at identifying founder signals. Analyze Twitter activity. Respond only with valid JSON.",
-            messages=[{"role": "user", "content": prompt}]
         )
 
-        if response.content:
-            text = response.content[0].text
-            import json
-            try:
-                data = json.loads(text)
-                log.info(f"Twitter analysis for @{handle}: {data['signal_tier']}")
-                return data
-            except json.JSONDecodeError:
-                log.error(f"Failed to parse Claude response as JSON")
-                return {
-                    'signal_tier': 'LOW',
-                    'signals_detected': [],
-                    'confidence': 0.0,
-                    'recent_founding_hints': False
-                }
+        data = json.loads(text)
+        log.info(f"Twitter analysis for @{handle}: {data['signal_tier']}")
+        return data
+    except json.JSONDecodeError:
+        log.error(f"Failed to parse Claude response as JSON")
+        return {
+            'signal_tier': 'LOW',
+            'signals_detected': [],
+            'confidence': 0.0,
+            'recent_founding_hints': False
+        }
     except Exception as e:
         log.error(f"Error analyzing Twitter for @{handle}: {e}")
         return {

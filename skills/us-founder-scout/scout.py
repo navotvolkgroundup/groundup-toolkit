@@ -251,14 +251,12 @@ LOW = Accelerator completion, grants, advisory roles
 """
 
     try:
-        response = call_claude(
+        text = call_claude(
+            prompt,
+            system_prompt="You are an expert at identifying tech founders. Respond only with valid JSON.",
             model="claude-haiku-4-5-20251001",
-            system="You are an expert at identifying tech founders. Respond only with valid JSON.",
-            messages=[{"role": "user", "content": prompt}]
         )
 
-        # Parse JSON from response
-        text = response.content[0].text if response.content else ""
         data = json.loads(text)
         return data
     except Exception as e:

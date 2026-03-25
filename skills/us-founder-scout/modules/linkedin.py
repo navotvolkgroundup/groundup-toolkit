@@ -276,28 +276,24 @@ LOW = Still at previous company, older posts, unclear signals
 """
 
     try:
-        response = call_claude(
+        import json
+        text = call_claude(
+            prompt,
+            system_prompt="You are an expert at identifying tech founders. Analyze for founding signals. Respond only with valid JSON.",
             model="claude-haiku-4-5-20251001",
-            system="You are an expert at identifying tech founders. Analyze for founding signals. Respond only with valid JSON.",
-            messages=[{"role": "user", "content": prompt}]
         )
 
-        if response.content:
-            text = response.content[0].text
-            # Try to parse JSON
-            import json
-            try:
-                data = json.loads(text)
-                log.info(f"Profile analysis for {name}: {data['signal_tier']}")
-                return data
-            except json.JSONDecodeError:
-                log.error(f"Failed to parse Claude response as JSON: {text}")
-                return {
-                    'is_founder_signal': False,
-                    'signal_tier': 'LOW',
-                    'reasons': ['JSON parse error'],
-                    'confidence': 0.0
-                }
+        data = json.loads(text)
+        log.info(f"Profile analysis for {name}: {data['signal_tier']}")
+        return data
+    except json.JSONDecodeError:
+        log.error(f"Failed to parse Claude response as JSON")
+        return {
+            'is_founder_signal': False,
+            'signal_tier': 'LOW',
+            'reasons': ['JSON parse error'],
+            'confidence': 0.0
+        }
     except Exception as e:
         log.error(f"Error analyzing profile for {name}: {e}")
         return {
