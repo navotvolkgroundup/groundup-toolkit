@@ -1,5 +1,6 @@
 """Twitter/X browser automation for signal detection."""
 
+import json
 import re
 import time
 import logging
@@ -15,6 +16,15 @@ except ImportError:
     call_claude = None
 
 log = logging.getLogger("us-founder-scout")
+
+
+def _parse_json(text):
+    """Extract JSON from Claude response, stripping markdown fences if present."""
+    text = text.strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+    return json.loads(text)
 
 # --- Configuration ---
 TWITTER_BROWSER_PROFILE = "twitter"
@@ -179,7 +189,7 @@ LOW = No clear signals or older posts
             model="claude-haiku-4-5-20251001",
         )
 
-        data = json.loads(text)
+        data = _parse_json(text)
         log.info(f"Twitter analysis for @{handle}: {data['signal_tier']}")
         return data
     except json.JSONDecodeError:

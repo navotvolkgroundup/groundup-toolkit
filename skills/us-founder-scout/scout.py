@@ -63,6 +63,15 @@ from pathlib import Path
 import hashlib
 import re
 
+
+def _parse_json(text):
+    """Extract JSON from Claude response, stripping markdown fences if present."""
+    text = text.strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+    return json.loads(text)
+
 # Access control: Jordan only
 JORDAN_ONLY = True
 ALLOWED_USER = "jordan"
@@ -257,7 +266,7 @@ LOW = Accelerator completion, grants, advisory roles
             model="claude-haiku-4-5-20251001",
         )
 
-        data = json.loads(text)
+        data = _parse_json(text)
         return data
     except Exception as e:
         log.error(f"Error analyzing profile for {name}: {e}")

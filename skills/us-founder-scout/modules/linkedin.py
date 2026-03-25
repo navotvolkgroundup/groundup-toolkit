@@ -1,5 +1,6 @@
 """LinkedIn browser automation for US Founder Scout — search, profile lookup, and profile parsing."""
 
+import json
 import re
 import time
 import logging
@@ -16,6 +17,15 @@ except ImportError:
     call_claude = None
 
 log = logging.getLogger("us-founder-scout")
+
+
+def _parse_json(text):
+    """Extract JSON from Claude response, stripping markdown fences if present."""
+    text = text.strip()
+    if text.startswith('```'):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+    return json.loads(text)
 
 # --- Configuration ---
 LINKEDIN_BROWSER_PROFILE = "linkedin"
@@ -283,7 +293,7 @@ LOW = Still at previous company, older posts, unclear signals
             model="claude-haiku-4-5-20251001",
         )
 
-        data = json.loads(text)
+        data = _parse_json(text)
         log.info(f"Profile analysis for {name}: {data['signal_tier']}")
         return data
     except json.JSONDecodeError:
