@@ -517,7 +517,12 @@ def cmd_scan():
                 alert_message += f"  {founder.get('source_company', 'Unknown')}\n"
 
             try:
-                send_whatsapp(message=alert_message, recipient='Jordan')
+                jordan = config.get_member_by_name("Jordan")
+                jordan_phone = jordan.get("phone") if jordan else None
+                if jordan_phone:
+                    send_whatsapp(jordan_phone, alert_message)
+                else:
+                    log.warning("Jordan's phone not found in config")
             except Exception as e:
                 log.warning(f"Could not send WhatsApp alert: {e}")
 

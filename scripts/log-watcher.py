@@ -17,6 +17,7 @@ LOG_FILES = [
     'meeting-reminders.log', 'founder-scout.log', 'founder-briefs.log',
     'keep-on-radar.log', 'christina.log', 'daily-backup.log',
     'daily-maintenance.log', 'meeting-session-health.log',
+    'us-founder-scout.log',
 ]
 ERROR_RE = re.compile(
     r'('
