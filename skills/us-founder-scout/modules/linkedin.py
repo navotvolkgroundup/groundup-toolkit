@@ -57,9 +57,10 @@ def linkedin_search(query, geo_us_only=True):
         )
         time.sleep(LINKEDIN_NAV_DELAY)
 
-        # Get HTML snapshot with profile URLs
+        # Get ARIA snapshot with names, headlines, and locations
         result = subprocess.run(
-            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'snapshot', '--format', 'html'],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'snapshot',
+             '--format', 'aria', '--limit', '800'],
             capture_output=True, text=True, timeout=15
         )
 
@@ -145,58 +146,64 @@ def _strip_aria_chrome(aria_text):
 
 
 def extract_profiles_from_search(search_snapshot):
-    """Parse profile URLs, names, and headlines from a LinkedIn search HTML snapshot.
+    """Parse names, headlines, and locations from a LinkedIn search ARIA snapshot.
 
-    Returns list of dicts: [{"name": "...", "linkedin_url": "...", "headline": "..."}, ...]
+    Returns list of dicts: [{"name": "...", "linkedin_url": "...", "headline": "...", "location": "..."}, ...]
     """
     if not search_snapshot:
         return []
 
     profiles = []
-    seen_urls = set()
+    seen_names = set()
+
+    SKIP_NAMES = {
+        'LinkedIn', 'Home', 'My Network', 'Jobs', 'Messaging', 'Notifications',
+        'Try Premium for $0', 'Try Premium for ₪0',
+    }
 
     lines = search_snapshot.split('\n')
     i = 0
     while i < len(lines):
         line = lines[i].strip()
 
-        # Look for: - link "Person Name" [ref=...]:
-        name_match = re.match(r'- link "([^"]+)" \[ref=', line)
-        if name_match:
-            name = name_match.group(1)
+        # Look for: link "View <Name>'s profile"
+        view_match = re.search(r'link "View (.+?)\'s profile"', line)
+        if view_match:
+            name = view_match.group(1)
 
-            # Skip navigation links and junk entries
-            if (name.startswith('View ') or name.startswith('Provides ')
-                    or len(name) > 50
-                    or name in ('LinkedIn', 'Home', 'My Network', 'Jobs', 'Messaging', 'Notifications')):
+            if name in seen_names or name in SKIP_NAMES or len(name) > 60:
                 i += 1
                 continue
 
-            # Look for URL on the next few lines
-            linkedin_url = None
-            headline = None
+            # Scan ahead for StaticText lines: degree, headline, location
+            headline = ''
+            location = ''
+            for j in range(i + 1, min(i + 20, len(lines))):
+                text_match = re.search(r'StaticText "([^"]*)"', lines[j])
+                if not text_match:
+                    continue
+                text = text_match.group(1)
 
-            for j in range(i + 1, min(i + 10, len(lines))):
-                url_match = re.search(r'/url: (https://www\.linkedin\.com/in/[^\s]+)', lines[j])
-                if url_match:
-                    linkedin_url = url_match.group(1).rstrip(')')
+                # Skip noise
+                if text.startswith('View ') or text in ('Connect', 'Follow', 'Message'):
+                    continue
+                if 'degree connection' in text or text == 'Premium member':
+                    continue
+
+                # First meaningful StaticText is headline, second is location
+                if not headline:
+                    headline = text
+                elif not location:
+                    location = text
                     break
 
-            # Try to extract headline from surrounding context
-            for j in range(i + 1, min(i + 15, len(lines))):
-                if 'StaticText "' in lines[j]:
-                    text = re.search(r'StaticText "([^"]*)"', lines[j])
-                    if text and len(text.group(1)) > 5 and not text.group(1).startswith('View'):
-                        headline = text.group(1)
-                        break
-
-            if linkedin_url and linkedin_url not in seen_urls:
-                profiles.append({
-                    'name': name,
-                    'linkedin_url': linkedin_url,
-                    'headline': headline or 'Unknown'
-                })
-                seen_urls.add(linkedin_url)
+            seen_names.add(name)
+            profiles.append({
+                'name': name,
+                'linkedin_url': f'https://www.linkedin.com/in/{name.lower().replace(" ", "-")}',
+                'headline': headline or 'Unknown',
+                'location': location or '',
+            })
 
         i += 1
 
