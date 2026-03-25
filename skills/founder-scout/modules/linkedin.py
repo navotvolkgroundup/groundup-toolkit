@@ -18,7 +18,7 @@ def linkedin_browser_available():
     """Check if the LinkedIn browser session is available."""
     try:
         result = subprocess.run(
-            ['openclaw', 'browser', 'status', '--browser-profile', LINKEDIN_BROWSER_PROFILE, '--json'],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'status', '--json'],
             capture_output=True, text=True, timeout=10
         )
         return result.returncode == 0
@@ -36,14 +36,14 @@ def linkedin_search(query):
 
         url = f"https://www.linkedin.com/search/results/people/?keywords={encoded}"
         subprocess.run(
-            ['openclaw', 'browser', 'navigate', '--browser-profile', LINKEDIN_BROWSER_PROFILE, url],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'navigate', url],
             capture_output=True, text=True, timeout=15
         )
         time.sleep(3)
 
         # Use --format html to get profile URLs and headlines
         result = subprocess.run(
-            ['openclaw', 'browser', 'snapshot', '--browser-profile', LINKEDIN_BROWSER_PROFILE, '--format', 'html'],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'snapshot', '--format', 'html'],
             capture_output=True, text=True, timeout=15
         )
         return result.stdout if result.returncode == 0 else None
@@ -94,13 +94,13 @@ def linkedin_profile_lookup(url):
     """Look up a LinkedIn profile using the browser skill. Returns cleaned profile text."""
     try:
         subprocess.run(
-            ['openclaw', 'browser', 'navigate', '--browser-profile', LINKEDIN_BROWSER_PROFILE, url],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'navigate', url],
             capture_output=True, text=True, timeout=15
         )
         time.sleep(5)
 
         result = subprocess.run(
-            ['openclaw', 'browser', 'snapshot', '--browser-profile', LINKEDIN_BROWSER_PROFILE,
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'snapshot',
              '--format', 'aria', '--limit', '1000'],
             capture_output=True, text=True, timeout=15
         )

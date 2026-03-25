@@ -37,7 +37,7 @@ def twitter_browser_available():
     """Check if the Twitter browser session is available."""
     try:
         result = subprocess.run(
-            ['openclaw', 'browser', 'status', '--browser-profile', TWITTER_BROWSER_PROFILE, '--json'],
+            ['openclaw', 'browser', '--browser-profile', TWITTER_BROWSER_PROFILE, 'status', '--json'],
             capture_output=True, text=True, timeout=10
         )
         return result.returncode == 0
@@ -62,14 +62,14 @@ def twitter_search(query):
 
         # Navigate to search results
         subprocess.run(
-            ['openclaw', 'browser', 'navigate', '--browser-profile', TWITTER_BROWSER_PROFILE, url],
+            ['openclaw', 'browser', '--browser-profile', TWITTER_BROWSER_PROFILE, 'navigate', url],
             capture_output=True, text=True, timeout=15
         )
         time.sleep(TWITTER_NAV_DELAY)
 
         # Get ARIA snapshot of search results
         result = subprocess.run(
-            ['openclaw', 'browser', 'snapshot', '--browser-profile', TWITTER_BROWSER_PROFILE, '--format', 'aria', '--limit', '500'],
+            ['openclaw', 'browser', '--browser-profile', TWITTER_BROWSER_PROFILE, 'snapshot', '--format', 'aria', '--limit', '500'],
             capture_output=True, text=True, timeout=15
         )
 
@@ -93,14 +93,14 @@ def twitter_profile_timeline(handle):
 
         # Navigate to profile
         subprocess.run(
-            ['openclaw', 'browser', 'navigate', '--browser-profile', TWITTER_BROWSER_PROFILE, url],
+            ['openclaw', 'browser', '--browser-profile', TWITTER_BROWSER_PROFILE, 'navigate', url],
             capture_output=True, text=True, timeout=15
         )
         time.sleep(TWITTER_NAV_DELAY)
 
         # Get ARIA snapshot
         result = subprocess.run(
-            ['openclaw', 'browser', 'snapshot', '--browser-profile', TWITTER_BROWSER_PROFILE, '--format', 'aria', '--limit', '500'],
+            ['openclaw', 'browser', '--browser-profile', TWITTER_BROWSER_PROFILE, 'snapshot', '--format', 'aria', '--limit', '500'],
             capture_output=True, text=True, timeout=15
         )
 

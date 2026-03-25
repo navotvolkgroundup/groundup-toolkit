@@ -103,8 +103,8 @@ log = get_logger("us-founder-scout")
 # CONFIG & CONSTANTS
 # ============================================================================
 
-DATA_DIR = Path.home() / ".groundup-toolkit" / "us-founder-scout"
-DB_PATH = DATA_DIR / "founders.db"
+DATA_DIR = Path.home() / ".openclaw" / "data"
+DB_PATH = DATA_DIR / "us-founder-scout.db"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DEEP_TECH_COMPANIES = {
@@ -577,16 +577,58 @@ def cmd_watchlist_update():
     """Re-scan tracked founders for signal changes."""
     log.info("Updating watchlist...")
 
+    if not linkedin_browser_available():
+        log.error("LinkedIn browser not available. Cannot run watchlist update.")
+        print("ERROR: LinkedIn browser not available.")
+        return
+
     init_db()
     conn = get_db()
     c = conn.cursor()
 
     c.execute('SELECT id, name, linkedin_url FROM founders WHERE status = "OPEN"')
     founders = c.fetchall()
-    conn.close()
 
     log.info(f"Re-scanning {len(founders)} tracked founders")
     print(f"Updating {len(founders)} founders on watchlist...")
+
+    updated = 0
+    for founder_id, name, linkedin_url in founders:
+        if not linkedin_url:
+            continue
+        try:
+            profile_text = linkedin_profile_lookup(linkedin_url)
+            if not profile_text:
+                log.warning(f"Could not fetch profile for {name}")
+                continue
+
+            analysis = analyze_profile_for_signals(name, profile_text)
+
+            new_tier = analysis.get('signal_tier', 'LOW')
+            reasons = ', '.join(analysis.get('reasons', []))
+
+            c.execute('''
+                UPDATE founders SET
+                signal_tier = ?, last_signal = ?, last_scanned = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (new_tier, reasons, founder_id))
+
+            if analysis.get('is_founder_signal'):
+                c.execute('''
+                    INSERT INTO signals (founder_id, signal_type, description, tier)
+                    VALUES (?, 'watchlist_rescan', ?, ?)
+                ''', (founder_id, reasons, new_tier))
+
+            updated += 1
+            log.info(f"Updated {name}: {new_tier}")
+            time.sleep(2)
+        except Exception as e:
+            log.error(f"Error re-scanning {name}: {e}")
+
+    conn.commit()
+    conn.close()
+    print(f"Updated {updated}/{len(founders)} founders")
 
 def cmd_status():
     """Print current watchlist state."""

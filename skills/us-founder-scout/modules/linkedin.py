@@ -26,7 +26,7 @@ def linkedin_browser_available():
     """Check if the LinkedIn browser session is available."""
     try:
         result = subprocess.run(
-            ['openclaw', 'browser', 'status', '--browser-profile', LINKEDIN_BROWSER_PROFILE, '--json'],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'status', '--json'],
             capture_output=True, text=True, timeout=10
         )
         return result.returncode == 0
@@ -50,14 +50,14 @@ def linkedin_search(query):
 
         # Navigate to search results
         subprocess.run(
-            ['openclaw', 'browser', 'navigate', '--browser-profile', LINKEDIN_BROWSER_PROFILE, url],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'navigate', url],
             capture_output=True, text=True, timeout=15
         )
         time.sleep(LINKEDIN_NAV_DELAY)
 
         # Get HTML snapshot with profile URLs
         result = subprocess.run(
-            ['openclaw', 'browser', 'snapshot', '--browser-profile', LINKEDIN_BROWSER_PROFILE, '--format', 'html'],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'snapshot', '--format', 'html'],
             capture_output=True, text=True, timeout=15
         )
 
@@ -79,14 +79,14 @@ def linkedin_profile_lookup(url):
 
         # Navigate to profile
         subprocess.run(
-            ['openclaw', 'browser', 'navigate', '--browser-profile', LINKEDIN_BROWSER_PROFILE, url],
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'navigate', url],
             capture_output=True, text=True, timeout=15
         )
         time.sleep(5)
 
         # Get ARIA snapshot of profile
         result = subprocess.run(
-            ['openclaw', 'browser', 'snapshot', '--browser-profile', LINKEDIN_BROWSER_PROFILE,
+            ['openclaw', 'browser', '--browser-profile', LINKEDIN_BROWSER_PROFILE, 'snapshot',
              '--format', 'aria', '--limit', '1000'],
             capture_output=True, text=True, timeout=15
         )
