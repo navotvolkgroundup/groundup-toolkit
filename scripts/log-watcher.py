@@ -57,6 +57,8 @@ TRANSIENT_RE = re.compile(
     r'|Claude API error: HTTP 400'
     r'|No active WhatsApp Web listener'
     r'|Illegal option.*pipefail'
+    r'|Failed to parse Claude response as JSON'
+    r'|Claude company extraction failed'
     r')', re.IGNORECASE)
 
 STATE_FILE = Path(__file__).resolve().parent.parent / 'data' / 'log-watcher-seen.json'

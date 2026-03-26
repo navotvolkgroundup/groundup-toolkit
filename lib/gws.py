@@ -242,29 +242,32 @@ def gws_gmail_send_bodyfile(to, subject, body_file):
 def gws_gmail_attachment_download(message_id, attachment_id, out_path):
     """Download a Gmail attachment and save to file.
 
-    Equivalent to: gog gmail attachment msgId attId --out path
+    Uses gws-auth --output flag to write directly to disk,
+    avoiding stdout maxBuffer issues with large attachments.
     """
-    result = run_gws("gmail users messages attachments get", params={
-        "userId": "me",
-        "messageId": message_id,
-        "id": attachment_id,
-    })
-    if result is None:
-        return False
-
-    data = result.get("data", "")
-    if not data:
-        print("  Attachment has no data", file=sys.stderr)
-        return False
-
+    cmd = [
+        'gws-auth', 'gmail', 'users', 'messages', 'attachments', 'get',
+        '--params', json.dumps({
+            "userId": "me",
+            "messageId": message_id,
+            "id": attachment_id,
+        }),
+        '--output', out_path,
+    ]
     try:
-        # Gmail API returns URL-safe base64
-        decoded = base64.urlsafe_b64decode(data)
-        with open(out_path, 'wb') as f:
-            f.write(decoded)
-        return True
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            print(f"  gws-auth attachment download error: {stderr[:300]}", file=sys.stderr)
+            return False
+        return os.path.exists(out_path) and os.path.getsize(out_path) > 0
+    except subprocess.TimeoutExpired:
+        print(f"  Attachment download timeout (60s)", file=sys.stderr)
+        return False
     except Exception as e:
-        print(f"  Attachment decode error: {e}", file=sys.stderr)
+        print(f"  Attachment download error: {e}", file=sys.stderr)
         return False
 
 

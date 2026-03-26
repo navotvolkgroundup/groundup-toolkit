@@ -94,6 +94,9 @@ def _extract_company_with_claude(subject, body_snippet):
     if not ANTHROPIC_API_KEY:
         return None
     try:
+        # Sanitize text: remove surrogates and non-printable chars that break JSON
+        clean_subject = subject.encode('utf-8', errors='ignore').decode('utf-8') if subject else ''
+        clean_body = body_snippet[:500].encode('utf-8', errors='ignore').decode('utf-8') if body_snippet else ''
         resp = requests.post(
             ANTHROPIC_API_URL,
             headers={
@@ -108,7 +111,7 @@ def _extract_company_with_claude(subject, body_snippet):
                     f'Extract ONLY the startup/company name from this email. '
                     f'Reply with just the company name, nothing else. '
                     f'If you cannot determine it, reply "UNKNOWN".\n\n'
-                    f'Subject: {subject}\nBody: {body_snippet[:500]}'}]
+                    f'Subject: {clean_subject}\nBody: {clean_body}'}]
             },
             timeout=10
         )
