@@ -29,7 +29,8 @@ function formatDate(ts: string | undefined, body: string): string | null {
     if (/[A-Za-z]/.test(m[1])) return m[1].trim()
   }
   if (!ts) return null
-  return new Date(Number(ts)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+  const ms = isNaN(Number(ts)) ? new Date(ts).getTime() : Number(ts)
+  return isNaN(ms) ? null : new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ name: string }> }) {
@@ -77,7 +78,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ name
     const noteName = headerMatch[1].trim().toLowerCase()
     if (noteName !== company.name.toLowerCase()) continue
 
-    const ts = note.properties.hs_timestamp ? Number(note.properties.hs_timestamp) : Date.now()
+    const raw = note.properties.hs_timestamp
+    const ts = raw ? (isNaN(Number(raw)) ? new Date(raw).getTime() : Number(raw)) : Date.now()
     companyNotes.push({
       id: note.id,
       body,
