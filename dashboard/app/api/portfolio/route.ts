@@ -52,9 +52,18 @@ function parseList(body: string, section: string): string[] {
     .slice(0, 3)
 }
 
+function tsToMs(ts: string | undefined): number {
+  if (!ts) return 0
+  const n = Number(ts)
+  if (!isNaN(n)) return n
+  const d = new Date(ts).getTime()
+  return isNaN(d) ? 0 : d
+}
+
 function parseDate(ts: string | undefined): string | null {
   if (!ts) return null
-  return new Date(Number(ts)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+  const ms = tsToMs(ts)
+  return ms ? new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null
 }
 
 interface StructuredMetrics {
@@ -156,7 +165,7 @@ async function fetchPortfolioData() {
     if (!cid) continue
     const existing = companyNotes.get(cid)
     const ts = note.properties.hs_timestamp
-    if (!existing || Number(ts) > Number(existing.ts ?? 0)) {
+    if (!existing || tsToMs(ts) > tsToMs(existing.ts)) {
       companyNotes.set(cid, {
         body: note.properties.hs_note_body ?? "",
         ts,
@@ -192,7 +201,7 @@ async function fetchPortfolioData() {
         companyId: matchedCid,
         health: structured?.health ?? parseHealth(body),
         lastUpdate: parseDateFromBody(noteData.body, noteData.ts),
-        lastUpdateTs: noteData.ts ? Number(noteData.ts) : null,
+        lastUpdateTs: noteData.ts ? tsToMs(noteData.ts) : null,
         summary: parseMetric(body, "Summary"),
         metrics: {
           arr: structured?.arr ?? parseMetric(body, "ARR"),
