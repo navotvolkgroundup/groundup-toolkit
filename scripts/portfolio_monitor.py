@@ -21,11 +21,11 @@ import hashlib
 import tempfile
 import requests
 from datetime import datetime
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from lib.structured_log import get_logger
 log = get_logger("portfolio-monitor")
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.config import config
 from lib.models import MODEL_HAIKU, ANTHROPIC_API_VERSION, ANTHROPIC_API_URL
 
