@@ -59,6 +59,7 @@ TRANSIENT_RE = re.compile(
     r'|Illegal option.*pipefail'
     r'|Failed to parse Claude response as JSON'
     r'|Claude company extraction failed'
+    r'|No signals or CRITICAL scores.*Skipping'
     r')', re.IGNORECASE)
 
 STATE_FILE = Path(__file__).resolve().parent.parent / 'data' / 'log-watcher-seen.json'
