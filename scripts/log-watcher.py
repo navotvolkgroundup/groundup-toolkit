@@ -59,7 +59,13 @@ TRANSIENT_RE = re.compile(
     r'|Illegal option.*pipefail'
     r'|Failed to parse Claude response as JSON'
     r'|Claude company extraction failed'
+    r'|Error extracting company name'
     r'|No signals or CRITICAL scores.*Skipping'
+    r'|Could not fetch profile for'
+    r'|Failed to associate deal with company'
+    r'|unsupported channel: whatsapp'
+    r'|WhatsApp failed, falling back to email'
+    r'|stdout maxBuffer length exceeded'
     r')', re.IGNORECASE)
 
 STATE_FILE = Path(__file__).resolve().parent.parent / 'data' / 'log-watcher-seen.json'
