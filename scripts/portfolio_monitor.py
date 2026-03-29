@@ -18,6 +18,7 @@ import json
 import time
 import base64
 import hashlib
+import logging
 import tempfile
 import requests
 from datetime import datetime
