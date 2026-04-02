@@ -182,6 +182,14 @@ if _cached_domains:
 
 COMPANY_TO_DOMAIN = {v: k for k, v in PORTFOLIO.items()}
 
+# All portfolio company names (including those without domains)
+_ALL_NAMES_JSON = os.path.join(os.path.dirname(__file__), '..', 'data', 'portfolio-companies.json')
+try:
+    import json as _j2
+    ALL_COMPANY_NAMES = {c['name'] for c in _j2.load(open(_ALL_NAMES_JSON)) if c.get('name')}
+except Exception:
+    ALL_COMPANY_NAMES = set(COMPANY_TO_DOMAIN.keys())
+
 
 def extract_email_body(thread_detail: dict) -> str:
     """Extract full text body from a Gmail thread detail object."""
@@ -233,7 +241,8 @@ def fuzzy_lookup_name(company_name: str):
     name = company_name.strip().lower()
     name_nospace = re.sub(r'[\s\-_.]', '', name)
 
-    for canonical in COMPANY_TO_DOMAIN:
+    # Search all portfolio companies (including those without domains)
+    for canonical in ALL_COMPANY_NAMES:
         c = canonical.lower()
         c_nospace = re.sub(r'[\s\-_.]', '', c)
         # Exact match
