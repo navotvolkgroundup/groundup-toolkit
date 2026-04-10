@@ -18,7 +18,7 @@ from lib.structured_log import get_logger
 log = get_logger("meeting-reminders")
 
 from lib.config import config
-from lib.whatsapp import send_whatsapp
+from lib.whatsapp import send_whatsapp, whatsapp_available, reset_circuit_breaker
 from lib.gws import gws_gmail_send
 
 # Module imports (same directory, not a package)
@@ -270,7 +270,12 @@ def process_post_meeting_nudges(db):
             )
 
             print(f"    📤 Sending post-meeting nudge: {summary} → {member['name']}")
-            sent = send_whatsapp_message(member['phone'], nudge_msg)
+            if whatsapp_available():
+                sent = send_whatsapp_message(member['phone'], nudge_msg)
+            else:
+                sent = False
+            if not sent and not whatsapp_available():
+                sent = send_email_fallback(email, member['name'], nudge_msg)
             if sent:
                 db.mark_nudged(event_id, email)
                 nudge_count += 1
@@ -300,6 +305,7 @@ def process_meeting_reminders():
 
 def _do_process_meeting_reminders():
     """Inner processing function (called under lock)"""
+    reset_circuit_breaker()  # fresh start each cron run
     print(f"[{datetime.now(pytz.UTC).replace(tzinfo=None).isoformat()}] Starting meeting reminder check...")
 
     db = ReminderDatabase(DB_PATH)
@@ -491,11 +497,14 @@ def _do_process_meeting_reminders():
 
             message = '\n'.join(message_lines)
 
-            # Send
+            # Send (skip WhatsApp if gateway is down, go straight to email)
             print(f"    📤 Sending reminder: {summary}")
-            sent = send_whatsapp_message(member['phone'], message)
+            if whatsapp_available():
+                sent = send_whatsapp_message(member['phone'], message)
+            else:
+                sent = False
             if not sent:
-                print(f"    📧 WhatsApp failed, falling back to email...")
+                print(f"    📧 WhatsApp {'unavailable' if not whatsapp_available() else 'failed'}, falling back to email...")
                 sent = send_email_fallback(email, member['name'], message)
             if sent:
                 db.mark_notified(event_id, email, start_time)
