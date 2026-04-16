@@ -492,6 +492,17 @@ def handle_portfolio_email(original_sender_email: str, subject: str, body: str, 
                     print(f"  → Matched subject word \"{word}\" to {company_name}")
                     break
 
+    # Try fuzzy matching company name from body (first 1000 chars)
+    if not company_name and body:
+        body_snippet = body[:1000]
+        for word in re.split(r'[\s\-–—:,;()\[\]]+', body_snippet):
+            if len(word) >= 3:
+                match = fuzzy_lookup_name(word)
+                if match:
+                    company_name = match
+                    print(f"  → Matched body word \"{word}\" to {company_name}")
+                    break
+
     if not company_name:
         return None
 

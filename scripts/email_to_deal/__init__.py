@@ -687,6 +687,23 @@ def process_email(thread):
     # When uncertain (no deck, no analysis), ask sender what to do
     if not deck_links and not analysis:
         intent = _classify_email_intent(subject, body)
+        if intent == 'PORTFOLIO':
+            log.info('Claude classified email as portfolio update')
+            portfolio_result = handle_portfolio_email(sender_email, subject, body, company_name_override=company_data.get('name'))
+            if portfolio_result and not portfolio_result.get('ask_sender'):
+                log.info('Handled as portfolio update for %s', portfolio_result["company_name"])
+                mark_email_processed(thread_id)
+                return True
+            # Could not auto-match — ask sender to confirm
+            sender_phone = EMAIL_TO_PHONE.get(sender_email)
+            company_hint = company_data.get('name', '')
+            msg = f"I got your email \"{subject}\". This looks like a portfolio company update{f' about {company_hint}' if company_hint else ''}, not a new deal. Should I log it as a portfolio touchpoint, or is this actually a new deal?"
+            if sender_phone:
+                send_whatsapp(sender_phone, msg)
+            send_email_simple(sender_email, f"Re: {subject}", msg + "\n\n- Christina")
+            log.info('Claude classified as portfolio — asked sender to confirm')
+            mark_email_processed(thread_id)
+            return False
         if intent == 'UNCERTAIN':
             sender_phone = EMAIL_TO_PHONE.get(sender_email)
             msg = f"I got your email \"{subject}\" but I'm not sure what to do with it. Should I:\n1. Log as a new deal\n2. Log as a portfolio update\n3. Ignore it"
